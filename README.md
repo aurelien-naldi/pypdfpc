@@ -1,51 +1,78 @@
 PDF presenter tool
 ==================
 
-As I use PDF files for presentations, I've been looking for some kind of
-presenter console for PDF files. Many such tools exist, but they are either
-too fancy or too limited.
+Fast and easy presentation tool for PDF files.
+It aims to make my presentations slightly more confortable,
+but also to teach me about poppler and Qt.
 
-pdfpc is nearly perfect, but while I can compile the last release, 
-the current git master does not seem to work with newer vala versions.
 
-As I wanted to experiment with PyQt, I tried to reproduce the features I want
-in this simple tool.
-It started as an experiment, but it seems to work well enough for me: it does most
-of what I wanted from pdfpc within less than 1k lines of python, thanks to the fantastic
-poppler bindings. It also seems relatively fast with the (simple) presentations I tested.
+Features
+--------
+
+* Presenter screen with current and next slide, timer and progress bar
+* Note slides in the presenter view
+* Switch master and secondary screens, single screen mode
+* Detect beamer's overlays: they don't count in the progress and can be skipped
+* Overview mode: view and select slides
+* Freeze the main screen
+* Hide the main screen (black or white)
+* Escape will unfreeze and unhide before exiting
+* No installation, no setup, no command-line option:
+* show help on screen and on the command line (if no file is given)
+
+
+To be fair, support for notes is a bit tricky:
+* Beamer "show notes on second screen" mode is supported if the file name ends with
+  ".right", ".left", ".top", or ".bottom" (before the .pdf extension).
+  Note that with this option, beamer tends to mess page number, which break
+  the overlay support.
+* Beamer's "show notes" mode is supported if the note pages are given
+  page number "0". See the example tex to set this up.
+* LibreOffice can export note pages at the end of the document, they wil be used
+  if the file name ends with ".end.pdf". For good results, you are encouraged to
+  adapt the notes master page.
+
+
+Some missing-but-would-be-nice-to-have features:
+
+* text notes based on PDF annotations
+* countdown mode for the timer
+* video support (as long as they don't depend on javascript actions)
+* transitions (based on PDF annotation)
 
 
 
 Depends
 -------
 
-* python 2.7
+It is tested with python 2.7, and probably ready for python3.
+
+It requires the following python bindings:
 * PyQt4
 * python-poppler-qt4
 
 
-How to use it?
---------------
+Fedora:
+    dnf install PyQt4 python-poppler-qt4
 
-No installation is needed.
-Run the tool without arguments and it will print all shortcuts and actions.
-Give it a PDF file as argument to start a presentation with it.
 
-Current functions and shortcuts:
+Debian/Ubuntu:
+    apt-get install python-qt4 python-poppler-qt4
 
-* next       Right Space      Go to the next slide or overlay
-* prev       Left Backspace   Go to the previous slide or overlay
-* forward    Down PgDown      Go to the next slide (skip overlays)
-* backward   Up PgUp          Go to the previous slide (skip overlays)
-* switch     S                Switch slide/presenter screens
-* pause      P                Pause or unpause the timer
-* freeze     F                Freeze the main slide (avoid disruption as you browse around)
-* black      B                Turn the main display black
-* white      W                Turn the main display white
-* start      Home             Jump to the first slide
-* reset      R                Jump to the first slide and reset the clock
-* overview   Tab O            Show a grid of slides for quick visual selection
-* escape     Esc Q            Leave modes (overview...), pause, quit the application
 
+
+Related tools
+-------------
+
+Here are a few other presenter tools for PDF documents:
+
+
+* https://code.google.com/p/pdf-presenter/
+* http://code.100allora.it/pdfcube/
+* http://impressive.sourceforge.net/
+  - fancy transitions
+  - highlight cursor or selection
+* http://davvil.github.io/pdfpc/
+  - has video support in git (not released and apparently it needs porting to newer vala)
 
 

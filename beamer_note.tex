@@ -1,0 +1,20 @@
+% using this template, all notes will be numbered "0"
+% which allow to detect note pages and associate them to the corresponding slides
+%
+% adapted from: http://tex.stackexchange.com/questions/183135/how-do-i-make-page-numbers-skip-note-slides
+
+
+\setbeameroption{show notes}
+
+
+\setbeamertemplate{note page}{
+    \addtocounter{page}{-\number\value{page}}
+    \begin{minipage}{2.1\textwidth}
+        \normalfont 
+        \fontsize{20}{34}
+        \selectfont 
+        \insertnote
+    \end{minipage}
+}
+
+

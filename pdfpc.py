@@ -1,25 +1,19 @@
 #! /usr/bin/python
 
+from __future__ import print_function, division
+
 import os, sys
 import time
-MISSING_DEPS = False
 try:
     from PyQt4 import QtGui, QtCore
-except:
-    MISSING_DEPS = True
-    print "Requires Qt4 bindings for python"
-try:
     import popplerqt4
 except:
-    print "Requires poppler-Qt4 bindings for python"
-    MISSING_DEPS = True
-
-if MISSING_DEPS:
+    print( "Requires python binding for Qt4 and poppler-Qt4" )
     sys.exit()
+
 
 # TODO
 #   multipage overview
-#   notes (read only, json-like or beamer big slides)
 #   caching ?
 #   jump ?
 #   video support ?
@@ -36,12 +30,13 @@ class Application(QtGui.QApplication):
         try:
             self.doc = Document(filename)
         except:
-            print "Error loading the file"
+            print( "Error loading the file" )
             sys.exit()
         
         self.cur_page = 0
         self.first_is_master = None
         self.helping = False
+        self.debug = False
         
         self.clock_start = None
         self.clock = 0
@@ -117,7 +112,7 @@ class Application(QtGui.QApplication):
         desktop = QtGui.QDesktopWidget()
         nb_screens = desktop.screenCount()
         if nb_screens > 2:
-            print "Warning: no support for more than 2 screens"
+            print( "Warning: no support for more than 2 screens" )
         
         if self.first_is_master is None:
             self.first_is_master = True
@@ -192,7 +187,7 @@ class Application(QtGui.QApplication):
     
     def jump(self):
         "[TODO] jump to a  given slide"
-        print "TODO: jump"
+        print( "TODO: jump" )
     
     def start(self):
         "Jump to the first slide"
@@ -253,7 +248,7 @@ class Application(QtGui.QApplication):
                 self.presenter.overview_mode = False
             self.refresh()
         else:
-            print "Unsupported link type?"
+            print( "Unsupported link type?" )
 
 
 def find_link(evt, links):
@@ -271,10 +266,10 @@ def find_link(evt, links):
                 return l
 
 
-def place_image(qpainter, info, x,y,w,h, links=None, linkPaint=None):
+def place_image(qpainter, info, x,y,w,h, links=None, linkPaint=None, note=False):
     "Paint a page info centered in the selected area"
     if info:
-        image = info.get_image(w,h)
+        image = info.get_image(w,h, note)
         size = image.size()
         iw = size.width()
         ih = size.height()
@@ -309,6 +304,16 @@ def place_view(view, desktop, idx):
         view.showFullScreen()
         view.setGeometry( desktop.screenGeometry(idx) )
     view.setup()
+
+def show_progress(qp, x,y, w,h, cur, total):
+    if cur < 1 or cur >= total:
+        return
+    
+    pw = w*cur/total
+    qp.setBrush(ICON)
+    qp.drawRect(x,y,w,h)
+    qp.setBrush(COLD)
+    qp.drawRect(x,y,pw,h)
 
 
 class Presenter(QtGui.QFrame):
@@ -367,6 +372,9 @@ class Presenter(QtGui.QFrame):
         icon_m = 20
         icon_w = 3*height/20
         icon_top = height - icon_w
+        h_progress = icon_w / 10
+        r_progress = (0,height-h_progress+margin, width, h_progress)
+        icon_w -= h_progress
         r_timer = (icon_m+2*(icon_m+icon_w), icon_top, width-4*icon_w, icon_w)
         r_paused = (width-icon_w, icon_top, icon_w, icon_w, icon_m)
         
@@ -376,9 +384,11 @@ class Presenter(QtGui.QFrame):
         font_size = min(r_timer[2] / 10, 3*r_timer[3]/4)
         font_size = icon_w - 3*icon_m
         self.font = QtGui.QFont('Sans', font_size/font_scale)
+        self.debug_font = QtGui.QFont('Sans', font_size/font_scale/10)
         
         r_colored = (icon_m, icon_top, icon_w, icon_w, icon_m)
         r_frozen = (2*icon_m+icon_w, icon_top, icon_w, icon_w, icon_m)
+        
         
         self.layout = {
             "cur": r_cur,
@@ -388,6 +398,7 @@ class Presenter(QtGui.QFrame):
             "paused": r_paused,
             "frozen": r_frozen,
             "colored": r_colored,
+            "progress": r_progress,
             "overview": r_overview,
         }
     
@@ -433,19 +444,33 @@ class Presenter(QtGui.QFrame):
             
             x,y,w,h = self.layout["cur"]
             info = self.doc.get_current()
-            place_image(qp, info, x,y,w,h, self.link_map, LINK)
-            
-            x,y,w,h = self.layout["next"]
-            info = self.doc.get_next()
-            if info:
-                place_image(qp, info, x,y,w,h)
-                self.link_map.append( (x,y,x+w,y+h,info) )
+            if self.app.debug:
+                linkPaint = LINK
+            else:
+                linkPaint = None
+            place_image(qp, info, x,y,w,h, self.link_map, linkPaint)
+            if self.app.debug:
+                qp.setPen(COLD)
+                qp.setFont(self.debug_font)
+                qp.drawText(x,y,w,h, QtCore.Qt.AlignCenter, info.label)
             
             x,y,w,h = self.layout["over"]
-            info = self.doc.get_next_overlay()
-            if info:
-                place_image(qp, info, x,y,w,h)
-                self.link_map.append( (x,y,x+w,y+h, info) )
+            if info.has_note:
+                note=True
+                o_info = info
+            else:
+                o_info = self.doc.get_next_overlay()
+                note=False
+            if o_info:
+                place_image(qp, o_info, x,y,w,h, note=note)
+                self.link_map.append( (x,y,x+w,y+h, o_info) )
+            
+            x,y,w,h = self.layout["next"]
+            n_info = self.doc.get_next()
+            if n_info:
+                place_image(qp, n_info, x,y,w,h)
+                self.link_map.append( (x,y,x+w,y+h, n_info) )
+        
         
         x,y,w,h = self.layout["timer"]
         qp.setPen(TEXT)
@@ -483,6 +508,10 @@ class Presenter(QtGui.QFrame):
             qp.drawRect(x,y,w,h)
             qp.setBrush(self.doc.color)
             qp.drawRect(x+m,y+m,w-2*m,h-2*m)
+
+        x,y,w,h = self.layout["progress"]
+        show_progress(qp, x,y, w,h, self.doc.get_current().n+1, len(self.doc.layout))
+    
     
     def paint_overview(self, qp, width, height):
         # TODO: multipage overview
@@ -594,7 +623,35 @@ class Document:
         self.doc = popplerqt4.Poppler.Document.load(filename)
         self.lastPage = self.doc.numPages()
         
-        # detect overlays
+        self.note_vertical = False
+        self.note_horizontal = False
+        self.note_first = False
+        self.note_end = False
+        
+        if filename.endswith(".right.pdf"):
+            self.note_horizontal = True
+        elif filename.endswith(".left.pdf"):
+            self.note_horizontal = True
+            self.note_first = True
+        elif filename.endswith(".bottom.pdf"):
+            self.note_vertical = True
+        elif filename.endswith(".top.pdf"):
+            self.note_vertical = True
+            self.note_first = True
+        elif filename.endswith(".end.pdf"):
+            # the second half of pages are note pages (LibreOffice export)
+            self.note_end = True
+            self.lastPage /= 2
+        elif filename.endswith(".notes.pdf"):
+            # note pages in between regular pages
+            pass
+        
+        if NOTE_LABEL is None or self.note_horizontal or self.note_vertical or self.note_end:
+            search_note = False
+        else:
+            search_note = True
+        
+        # detect overlays and inline note pages
         prev = None
         o_prev = None
         o_start = None
@@ -602,11 +659,19 @@ class Document:
         self.pages = []
         for p in xrange(self.lastPage):
             page = self.doc.page(p)
+            if search_note and page.label() == NOTE_LABEL:
+                prev.set_note_page(page)
+                self.pages.append(None)
+                continue
             info = PageInfo(self, page, prev)
             prev = info
             self.pages.append(info)
             if info.o_prev is None:
                 self.layout.append(info)
+            
+            if self.note_end:
+                notepage = self.doc.page(p+self.lastPage)
+                prev.set_note_page(notepage)
         
         # intial state
         self.freezed = None
@@ -704,6 +769,7 @@ class PageInfo:
         # build linked list as we visit new pages
         if not prev or prev.label != self.label:
             # adding a new logical page
+            self.n = len(doc.layout)
             if prev and prev.o_start:
                 self.prev = prev.o_start
             else:
@@ -716,6 +782,7 @@ class PageInfo:
                 prev = prev.o_prev
         else:
             # Adding to the same overlay
+            self.n = prev.n
             prev.o_next = self
             self.prev = prev.prev
             self.o_prev = prev
@@ -726,8 +793,30 @@ class PageInfo:
         
         self.links = None
         size = self.page.pageSize()
-        self.width = size.width()
-        self.height = size.height()
+        x,y,w,h = 0,0,  size.width(), size.height()
+        
+        self.note_box = None
+        self.note_page = None
+        if doc.note_horizontal:
+            w /= 2
+            if doc.note_first:
+                x = w
+                self.note_box = (0,0,w,h)
+            else:
+                self.note_box = (w,0,w,h)
+        elif doc.note_vertical:
+            h /= 2
+            if doc.note_first:
+                y = h
+                self.note_box = (0,0,w,h)
+            else:
+                self.note_box = (0,h,w,h)
+        self.bbox = (x,y,w,h)
+        self.has_note = self.note_box != None
+    
+    def set_note_page(self, page):
+        self.note_page = page
+        self.has_note = True
     
     def get_links(self):
         if self.links is None:
@@ -739,16 +828,21 @@ class PageInfo:
                 y = area.y()
                 w = area.width()
                 h = area.height()
-                if link.isExternal():
-                    pass
-                    # TODO: external links??
-                else:
+                if isinstance(link, popplerqt4.Poppler.LinkGoto):
                     p_idx = link.destination().pageNumber() - 1
                     if p_idx < 0 or p_idx >= self.doc.lastPage:
-                        print "invalid link target: ", p_idx
+                        print( "invalid link target: ", p_idx )
                         continue
                     page = self.doc.pages[ p_idx ]
                     self.links.append( Link(x,y,w,h, page) )
+                elif isinstance(link, popplerqt4.Poppler.LinkAction):
+                    # TODO: action links (used by beamer)
+                    #print( "Action link: ", link.actionType() )
+                    pass
+                else:
+                    # other types of links to support?
+                    #print( type(link) )
+                    pass
         
         return self.links
     
@@ -756,18 +850,33 @@ class PageInfo:
         if self.n_page > 0:
             return 
     
-    def get_image(self, width, height):
+    def get_image(self, width, height, note=False):
         # TODO: cache image?
         # decide of DPI based on page and widget sizes
-        wratio = float(width) / self.width
-        hratio = float(height) / self.height
+        page = self.page
+        if note:
+            if self.note_page:
+                page = self.note_page
+                x,y,w,h = self.bbox
+            elif not self.note_box:
+                return
+            else:
+                x,y,w,h = self.note_box
+        else:
+            x,y,w,h = self.bbox
+        
+        wratio = float(width) / w
+        hratio = float(height) / h
         scale = min(wratio, hratio)
         dpi = 72 * scale
         
+        x *= scale
+        y *= scale
+        w *= scale
+        h *= scale
+        
         # render page as image
-        w = self.width * scale
-        h = self.height * scale
-        return self.page.renderToImage(dpi, dpi, 0, 0, w,h)
+        return page.renderToImage(dpi, dpi, x, y, w,h)
 
 class Link:
     def __init__(self, x,y,w,h, page):
@@ -805,12 +914,14 @@ LINK_N = None
 PAUSE = "P"
 FROZEN = "F"
 
+NOTE_LABEL = "0"
+
 K = QtCore.Qt
 A = Application
 KEYMAP = [
     
-    (A.next,      K.Key_Right, K.Key_Space, ),
-    (A.prev,      K.Key_Left, K.Key_Backspace, ), 
+    (A.next,      K.Key_Right, K.Key_Space, K.Key_MediaNext),
+    (A.prev,      K.Key_Left, K.Key_Backspace, K.Key_MediaPrevious), 
     (A.forward,   K.Key_Down, K.Key_PageDown,),
     (A.backward,  K.Key_Up, K.Key_PageUp, ),
     
@@ -890,15 +1001,15 @@ def show_help(qp, width, height):
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        print "Usage: %s <filename.pdf>" % sys.argv[0]
-        print
-        print get_help()[0]
-        print
+        print( "Usage: %s <filename.pdf>" % sys.argv[0] )
+        print()
+        print( get_help()[0] )
+        print()
         sys.exit()
     
     filename = sys.argv[1]
     if not os.path.isfile(filename):
-        print filename+" is not a file"
+        print( filename+" is not a file" )
         sys.exit()
     
     application = Application(filename)
