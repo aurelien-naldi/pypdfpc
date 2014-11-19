@@ -73,6 +73,9 @@ Here are a few other presenter tools for PDF documents:
   - fancy transitions
   - highlight cursor or selection
 * http://davvil.github.io/pdfpc/
+  - main inspiration: supports overlays, overview, freeze
   - has video support in git (not released and apparently it needs porting to newer vala)
+* http://sourceforge.net/projects/qpdfpresenter/
+  - video support
 
 
