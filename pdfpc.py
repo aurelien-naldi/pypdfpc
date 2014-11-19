@@ -36,6 +36,7 @@ class Application(QtGui.QApplication):
         self.cur_page = 0
         self.first_is_master = None
         self.helping = False
+        self.overview_mode = False
         self.debug = False
         
         self.clock_start = None
@@ -50,14 +51,30 @@ class Application(QtGui.QApplication):
         self.BASE_CURSOR = QtGui.QCursor(QtCore.Qt.ArrowCursor)
         self.LINK_CURSOR = QtGui.QCursor(QtCore.Qt.PointingHandCursor)
         
-        self.presenter = Presenter(self)
-        self.slide = Slide(self)
+        desktop = QtGui.QDesktopWidget()
+        nb_screens = desktop.screenCount()
+        if nb_screens > 2:
+            print( "Warning: no support for more than 2 screens" )
+        
+        self.views = [  ]
+        if nb_screens > 1:
+            presenter_view = View(self, desktop,0, True,False)
+            slide_view = View(self, desktop,1, False, False)
+            self.views = (presenter_view, slide_view)
+        else:
+            main_view = View(self, desktop,0, True,True)
+            self.views = (main_view, )
+        
+        # TODO: add slide if two screens present
+        #self.slide = Slide(self)
         self.switch()
         self.keymap = {}
         for short in KEYMAP:
             cb = short[0]
             for k in short[1:]:
                 self.keymap[k] = cb
+        
+        self.just_starting()
     
     def just_starting(self):
         "Helper to start the timer on the first move"
@@ -83,8 +100,8 @@ class Application(QtGui.QApplication):
                 QtGui.QApplication.setOverrideCursor(self.NO_CURSOR)
                 self.last_move_time = None
         
-        self.presenter.refresh(full)
-        self.slide.refresh(full)
+        for v in self.views:
+            v.refresh(full)
     
     def has_moved(self, evt, links):
         self.last_move_time = time.time()
@@ -109,24 +126,8 @@ class Application(QtGui.QApplication):
     
     def switch(self):
         "Switch slide/presenter screens"
-        desktop = QtGui.QDesktopWidget()
-        nb_screens = desktop.screenCount()
-        if nb_screens > 2:
-            print( "Warning: no support for more than 2 screens" )
-        
-        if self.first_is_master is None:
-            self.first_is_master = True
-        elif self.first_is_master:
-            self.first_is_master = False
-        else:
-            self.first_is_master = True
-        
-        if self.first_is_master:
-            place_view(self.presenter, desktop, 0)
-            place_view(self.slide, desktop, 1)
-        else:
-            place_view(self.presenter, desktop, 1)
-            place_view(self.slide, desktop, 0)
+        for v in self.views:
+            v.presenter_mode = not v.presenter_mode
         
         self.refresh()
     
@@ -203,8 +204,8 @@ class Application(QtGui.QApplication):
     
     def overview(self):
         "Show a grid of slides for quick visual selection"
-        self.presenter.overview_mode = not self.presenter.overview_mode
-        self.presenter.refresh()
+        self.overview_mode = not self.overview_mode
+        self.refresh()
     
     def escape(self):
         "Leave modes (overview...), pause, quit the application"
@@ -212,8 +213,9 @@ class Application(QtGui.QApplication):
             self.help()
             return
         
-        if self.presenter.overview_mode:
-            self.overview()
+        if self.overview_mode:
+            self.overview_mode = False
+            self.refresh()
             return
         
         if self.doc.color:
@@ -244,8 +246,8 @@ class Application(QtGui.QApplication):
         lx,ly,lx2,ly2, target = l
         if isinstance(target, PageInfo):
             self.doc.current = target
-            if self.presenter.overview_mode:
-                self.presenter.overview_mode = False
+            if self.overview_mode:
+                self.overview_mode = False
             self.refresh()
         else:
             print( "Unsupported link type?" )
@@ -295,16 +297,6 @@ def place_image(qpainter, info, x,y,w,h, links=None, linkPaint=None, note=False)
                 qpainter.drawRect(ax,ay, aw,ah)
 
 
-def place_view(view, desktop, idx):
-    "[UNTESTED] Place the selected view fullscreen on the selected monitor"
-    nb_screens = desktop.screenCount() 
-    if idx >= nb_screens:
-        view.hide()
-    else:
-        view.showFullScreen()
-        view.setGeometry( desktop.screenGeometry(idx) )
-    view.setup()
-
 def show_progress(qp, x,y, w,h, cur, total):
     if cur < 1 or cur >= total:
         return
@@ -316,17 +308,19 @@ def show_progress(qp, x,y, w,h, cur, total):
     qp.drawRect(x,y,pw,h)
 
 
-class Presenter(QtGui.QFrame):
-    """The presenter view:
-        * curent slides
-        * next slide and overlays
-        * timer
-        * overview mode
-        * status indicators (paused, frozen)
+class View(QtGui.QFrame):
+    """The view, with 3 modes:
+        * presenter console:
+            * curent slide
+            * next slide, overlays, notes
+            * timer
+            * status indicators (paused, frozen)
+        * overview mode (list of slides)
+        * main view (only the current slide)
     """
     
-    def __init__(self, app):
-        super(Presenter, self).__init__()
+    def __init__(self, app, desktop_info, target_desktop, is_presenter, is_single):
+        super(View, self).__init__()
         self.app = app
         self.doc = app.doc
         self.setGeometry(300, 300, 1000, 800)
@@ -334,11 +328,21 @@ class Presenter(QtGui.QFrame):
         self.cachedSize = None
         self.full_repaint = True
         self.link_map = None
-        self.overview_mode = False
+        self.presenter_mode = is_presenter
+        self.single_mode = is_single
         self.setMouseTracking(True)
     
+        # Place the selected view fullscreen on the selected monitor
+        self.showFullScreen()
+        self.setGeometry( desktop_info.screenGeometry(target_desktop) )
+    
+    
     def setup(self):
+        "Called at each repaint: returns the screen size and reconfigure if it changed (which should not happen after startup)"
         size = self.size()
+        if size == self.cachedSize:
+            return size.width(),size.height()
+        
         self.cachedSize = size
         
         width = size.width()
@@ -401,6 +405,7 @@ class Presenter(QtGui.QFrame):
             "progress": r_progress,
             "overview": r_overview,
         }
+        return width,height
     
     def keyPressEvent(self, e):
         self.app.handle_key(e)
@@ -414,24 +419,34 @@ class Presenter(QtGui.QFrame):
         self.update()
     
     def repaint(self):
-        size = self.size()
-        width = size.width()
-        height = size.height()
-        if size != self.cachedSize:
-            self. setup()
-            self.full_repaint = True
+        width,height = self. setup()
         
         qp = QtGui.QPainter()
         qp.begin(self)
-        if self.overview_mode:
+        if self.app.overview_mode and (self.presenter_mode or self.single_mode):
             self.paint_overview(qp, width, height)
-        else:
+        elif self.presenter_mode:
             self.paint_presenter(qp, width, height)
+        else:
+            self.paint_slide(qp, width, height)
         
         if self.app.helping:
             show_help(qp, width, height)
         
         qp.end()
+    
+    def paint_slide(self, qp, width, height):
+        if self.doc.color:
+            qp.setBrush(self.doc.color)
+            qp.drawRect(0, 0, width, height)
+        else:
+            # black background
+            qp.setBrush(BG)
+            qp.drawRect(0, 0, width, height)
+            
+            self.link_map = []
+            info = self.doc.get_slide()
+            place_image(qp, info, 0,0, width,height, self.link_map, LINK_N)
     
     def paint_presenter(self, qp, width, height):
         # partial repaints are not yet working: widget is painted in grey first
@@ -552,64 +567,6 @@ class Presenter(QtGui.QFrame):
     
     def mouseReleaseEvent(self, evt):
         self.app.click_map(evt, self.link_map)
-
-
-class Slide(QtGui.QFrame):
-    """The main slide view, which only displays the current slide
-    """
-    
-    def __init__(self, app):
-        super(Slide, self).__init__()
-        self.app = app
-        self.doc = app.doc
-        self.link_map = None
-        self.initUI()
-        self.setMouseTracking(True)
-    
-    def initUI(self):
-        self.setGeometry(300, 300, 1000, 800)
-        self.setWindowTitle('PDF View')
-    
-    def keyPressEvent(self, e):
-        self.app.handle_key(e)
-    
-    def mouseMoveEvent(self, e):
-        l = self.app.has_moved(e, self.link_map)
-    
-    def setup(self):
-        pass
-    
-    def refresh(self, full=True):
-        self.update()
-    
-    def repaint(self):
-        size = self.size()
-        width = size.width()
-        height = size.height()
-        
-        qp = QtGui.QPainter()
-        qp.begin(self)
-        
-        if self.doc.color:
-            qp.setBrush(self.doc.color)
-            qp.drawRect(0, 0, width, height)
-        else:
-            # black background
-            qp.setBrush(BG)
-            qp.drawRect(0, 0, width, height)
-            
-            self.link_map = []
-            info = self.doc.get_slide()
-            place_image(qp, info, 0,0, width,height, self.link_map, LINK_N)
-        
-        qp.end()
-    
-    def paintEvent(self, e):
-        self.repaint()
-    
-    def mouseReleaseEvent(self, evt):
-        self.app.click_map(evt, self.link_map)
-
 
 
 class Document:
