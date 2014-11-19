@@ -9,6 +9,8 @@ but also to teach me about poppler and Qt.
 Features
 --------
 
+The screenshots (taken with pdfpc's demo presentation) give a good first taste.
+
 * Presenter screen with current and next slide, timer and progress bar
 * Note slides in the presenter view
 * Switch master and secondary screens, single screen mode

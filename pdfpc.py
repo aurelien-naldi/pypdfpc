@@ -61,9 +61,6 @@ class Application(QtGui.QApplication):
             main_view = View(self, desktop,0, True,True)
             self.views = (main_view, )
         
-        # TODO: add slide if two screens present
-        #self.slide = Slide(self)
-        self.switch()
         self.keymap = {}
         for short in KEYMAP:
             cb = short[0]
@@ -138,6 +135,9 @@ class Application(QtGui.QApplication):
     
     def freeze(self):
         "Freeze the main slide (avoid disruption while browsing)"
+        # no freeze in single window mode
+        if len(self.views) < 2:
+            return
         self.doc.freeze()
         self.refresh()
     
@@ -156,29 +156,25 @@ class Application(QtGui.QApplication):
     
     def next(self):
         "Go to the next slide or overlay"
-        if self.just_starting():
-            return
+        self.just_starting()
         if self.doc.next():
             self.refresh()
     
     def prev(self):
         "Go to the previous slide or overlay"
-        if self.just_starting():
-            return
+        self.just_starting()
         if self.doc.prev():
             self.refresh()
 
     def forward(self):
         "Go to the next slide (skip overlays)"
-        if self.just_starting():
-            return
+        self.just_starting()
         if self.doc.next(True):
             self.refresh()
     
     def backward(self):
         "Go to the previous slide (skip overlays)"
-        if self.just_starting():
-            return
+        self.just_starting()
         if self.doc.prev(True):
             self.refresh()
     
@@ -236,6 +232,10 @@ class Application(QtGui.QApplication):
     
     def click_map(self, evt, links):
         "Detect if a link was clicked"
+        if self.helping:
+            self.help()
+            return
+        
         l = find_link(evt, links)
         if not l:
             return
@@ -264,17 +264,25 @@ def find_link(evt, links):
                 return l
 
 
-def place_image(qpainter, info, x,y,w,h, links=None, linkPaint=None, note=False):
-    "Paint a page info centered in the selected area"
+def place_image(qpainter, info, x,y,w,h, links=None, linkPaint=None, note=False, align=0):
+    "Paint a page info properly aligned in the selected area"
     if info:
         image = info.get_image(w,h, note)
         size = image.size()
         iw = size.width()
         ih = size.height()
-        if iw < w:
-            x += (w-iw)/2
-        if ih < h:
-            y += (h-ih)/2
+        if align == 0:
+            # center it
+            if iw < w:
+                x += (w-iw)/2
+            if ih < h:
+                y += (h-ih)/2
+        elif align == 1:
+            # align bottom/right
+            if iw < w:
+                x += w-iw
+            if ih < h:
+                y += h-ih
         qpainter.drawImage(x,y, image)
         
         if links is None:
@@ -297,15 +305,29 @@ def show_progress(qp, x,y, w,h, cur, total):
     if cur < 1 or cur > total:
         return
     
-    pw = w*cur/total
+    # horizontal or vertical bars
+    if w > h:
+        pw = w*cur/total
+        dw = w/total
+        dx = x + pw - dw
+        ph = h
+        dh = h
+        dy = y
+    else:
+        pw = w
+        dw = w
+        dx = x
+        ph = h*cur/total
+        dh = h/total
+        dy = y + ph - dh
+    
     qp.setBrush(ICON)
     qp.drawRect(x,y,w,h)
     qp.setBrush(COLD)
-    qp.drawRect(x,y,pw,h)
+    qp.drawRect(x,y,pw,ph)
     
-    dw = w/total
     qp.setBrush(HG)
-    qp.drawRect(x+pw-dw,y,dw,h)
+    qp.drawRect(dx,dy,dw,dh)
 
 
 class View(QtGui.QFrame):
@@ -344,9 +366,9 @@ class View(QtGui.QFrame):
             return size.width(),size.height()
         
         self.cachedSize = size
-        
-        width = size.width()
-        height = size.height()
+        border = 2
+        width = size.width() - 2*border
+        height = size.height() - 2*border
         
         # pick settings for the overview
         n = len(self.doc.layout)
@@ -359,25 +381,34 @@ class View(QtGui.QFrame):
                 onx += 1
             if onx > 5:
                 break
+        r_overview = (border,border, width,height, onx, ony, 10)
         
-        r_overview = (0,0, width,height, onx, ony, 10)
+        # presenter mode
         
-        margin = 10
-        width  -= 2*margin
-        height -= 2*margin
+        h_bottom = 3*height/20
+        h_progress = h_bottom / 8
+        icon_w = h_bottom - h_progress
+        icon_top = height + h_progress/2 - h_bottom
+        
+        margin = h_progress
+        icon_m = h_progress
+        
+        r_progress = (border,height-h_progress, width, h_progress)
+        
+        width -= h_progress
+        height -= h_progress
         
         w_cur = 2*width/3
-        h_cur= 4*height/5
+        h_cur= height - h_bottom
         h_next = 2*height/5
-        r_cur = (margin,margin, w_cur, h_cur)
-        r_next = (w_cur+2*margin, margin+h_next, width/3, height/3)
-        r_over = (w_cur+2*margin, margin/2, width/3, height/3)
+        r_cur = (border,border, w_cur, h_cur)
+        x_side = border+w_cur+margin
+        w_side = width - x_side - 2*h_progress
+        h_side = h_cur/2 - h_progress
+        r_over = (x_side, border, w_side, h_side)
+        r_next = (x_side, border+h_side+2*h_progress, w_side, h_side)
         
-        icon_m = 20
-        icon_w = 3*height/20
-        icon_top = height - icon_w
-        h_progress = icon_w / 10
-        r_progress = (0,height-h_progress+margin, width, h_progress)
+        r_o_progress = (width-h_progress,border, h_progress, h_cur)
         icon_w -= h_progress
         r_timer = (icon_m+2*(icon_m+icon_w), icon_top, width-4*icon_w, icon_w)
         r_paused = (width-icon_w, icon_top, icon_w, icon_w, icon_m)
@@ -403,6 +434,7 @@ class View(QtGui.QFrame):
             "frozen": r_frozen,
             "colored": r_colored,
             "progress": r_progress,
+            "o_progress": r_o_progress,
             "overview": r_overview,
         }
         return width,height
@@ -430,7 +462,7 @@ class View(QtGui.QFrame):
         else:
             self.paint_slide(qp, width, height)
         
-        if self.app.helping:
+        if self.app.helping and (self.presenter_mode or self.single_mode):
             show_help(qp, width, height)
         
         qp.end()
@@ -463,7 +495,13 @@ class View(QtGui.QFrame):
                 linkPaint = LINK
             else:
                 linkPaint = None
-            place_image(qp, info, x,y,w,h, self.link_map, linkPaint)
+            place_image(qp, info, x,y,w,h, self.link_map, linkPaint, align=-1)
+            
+            # progressbar for the current overlay
+            if info.overlay.count > 1:
+                x,y,w,h = self.layout["o_progress"]
+                show_progress(qp, x,y, w,h, info.o_n+1, info.overlay.count)
+            
             if self.app.debug:
                 qp.setPen(COLD)
                 qp.setFont(self.debug_font)
@@ -477,18 +515,14 @@ class View(QtGui.QFrame):
                 o_info = self.doc.get_next_overlay()
                 note=False
             if o_info:
-                place_image(qp, o_info, x,y,w,h, note=note)
+                place_image(qp, o_info, x,y,w,h, note=note, align=1)
                 self.link_map.append( (x,y,x+w,y+h, o_info) )
             
-            # progressbar for the current overlay
-            if info.overlay.count > 1:
-                dy = h/20
-                show_progress(qp, x,y+h+dy, w,dy, info.o_n+1, info.overlay.count)
             
             x,y,w,h = self.layout["next"]
             n_info = self.doc.get_next()
             if n_info:
-                place_image(qp, n_info, x,y,w,h)
+                place_image(qp, n_info, x,y,w,h, align=1)
                 self.link_map.append( (x,y,x+w,y+h, n_info) )
         
         
