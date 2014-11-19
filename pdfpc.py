@@ -27,11 +27,7 @@ class Application(QtGui.QApplication):
     
     def __init__(self, filename):
     
-        try:
-            self.doc = Document(filename)
-        except:
-            print( "Error loading the file" )
-            sys.exit()
+        self.doc = Document(filename)
         
         self.cur_page = 0
         self.first_is_master = None
@@ -298,7 +294,7 @@ def place_image(qpainter, info, x,y,w,h, links=None, linkPaint=None, note=False)
 
 
 def show_progress(qp, x,y, w,h, cur, total):
-    if cur < 1 or cur >= total:
+    if cur < 1 or cur > total:
         return
     
     pw = w*cur/total
@@ -306,6 +302,10 @@ def show_progress(qp, x,y, w,h, cur, total):
     qp.drawRect(x,y,w,h)
     qp.setBrush(COLD)
     qp.drawRect(x,y,pw,h)
+    
+    dw = w/total
+    qp.setBrush(HG)
+    qp.drawRect(x+pw-dw,y,dw,h)
 
 
 class View(QtGui.QFrame):
@@ -480,6 +480,11 @@ class View(QtGui.QFrame):
                 place_image(qp, o_info, x,y,w,h, note=note)
                 self.link_map.append( (x,y,x+w,y+h, o_info) )
             
+            # progressbar for the current overlay
+            if info.overlay.count > 1:
+                dy = h/20
+                show_progress(qp, x,y+h+dy, w,dy, info.o_n+1, info.overlay.count)
+            
             x,y,w,h = self.layout["next"]
             n_info = self.doc.get_next()
             if n_info:
@@ -577,7 +582,12 @@ class Document:
     """
     
     def __init__(self, filename):
-        self.doc = popplerqt4.Poppler.Document.load(filename)
+        try:
+            self.doc = popplerqt4.Poppler.Document.load(filename)
+        except:
+            print( "Error loading the file" )
+            sys.exit()
+        
         self.lastPage = self.doc.numPages()
         
         self.note_vertical = False
@@ -610,8 +620,6 @@ class Document:
         
         # detect overlays and inline note pages
         prev = None
-        o_prev = None
-        o_start = None
         self.layout = []
         self.pages = []
         for p in xrange(self.lastPage):
@@ -623,7 +631,7 @@ class Document:
             info = PageInfo(self, page, prev)
             prev = info
             self.pages.append(info)
-            if info.o_prev is None:
+            if info.overlay.count == 1:
                 self.layout.append(info)
             
             if self.note_end:
@@ -651,10 +659,10 @@ class Document:
         
         if pos < len(self.layout):
             cur = self.layout[pos]
-            for i in xrange(overlay):
-                if not cur.o_next:
-                    break
-                cur = cur.o_next
+            if overlay < cur.overlay.count:
+                cur = cur.overlay.pages[overlay]
+            else:
+                cur = cur.overlay.pages[-1]
             self.current = cur
             return True
         
@@ -667,24 +675,17 @@ class Document:
             self.freezed = None
     
     def next(self, skip_overlay=False):
-        if not skip_overlay and self.current.o_next:
-            self.current = self.current.o_next
-            return True
-        if self.current.next:
-            self.current = self.current.next
+        next = self.current.get_next(skip_overlay)
+        if next:
+            self.current = next
             return True
         
         return False
     
     def prev(self, skip_overlay=False):
-        if skip_overlay and self.current.o_start:
-            self.current = self.current.o_start
-            return True
-        if self.current.o_prev:
-            self.current = self.current.o_prev
-            return True
-        if self.current.prev:
-            self.current = self.current.prev
+        prev = self.current.get_prev(skip_overlay)
+        if prev:
+            self.current = prev
             return True
         return False
     
@@ -701,11 +702,27 @@ class Document:
         return self.current.next
         
     def get_next_overlay(self):
-        return self.current.o_next
+        return self.current.get_next_overlay()
     
     def get_page_info(self, p,o):
         pass
 
+
+class OverlayInfo:
+    def __init__(self,page):
+        self.count = 0
+        self.pages = []
+        self.add_page(page)
+    
+    def add_page(self, page):
+        page.o_n = self.count
+        page.overlay = self
+        self.count += 1
+        self.pages.append( page )
+    def get(self, n):
+        if n<0 or n>=self.count:
+            return None
+        return self.pages[n]
 
 class PageInfo:
     """Information about a specific page:
@@ -721,32 +738,26 @@ class PageInfo:
         
         # no known successor yet
         self.next = None
-        self.o_next = None
         
         # build linked list as we visit new pages
         if not prev or prev.label != self.label:
             # adding a new logical page
             self.n = len(doc.layout)
-            if prev and prev.o_start:
-                self.prev = prev.o_start
+            if prev :
+                self.prev = prev.overlay.get(0)
+                # adding self as next page for the previous overlay
+                for p in prev.overlay.pages:
+                    p.next = self
             else:
                 self.prev = prev
-            self.o_prev = None
-            self.o_start = None
-            # adding self as next page for the previous overlay
-            while prev:
-                prev.next = self
-                prev = prev.o_prev
+            OverlayInfo(self)
+            
         else:
             # Adding to the same overlay
             self.n = prev.n
-            prev.o_next = self
+            # update overlay count
+            prev.overlay.add_page(self)
             self.prev = prev.prev
-            self.o_prev = prev
-            if prev.o_start is None:
-                self.o_start = prev
-            else:
-                self.o_start = prev.o_start
         
         self.links = None
         size = self.page.pageSize()
@@ -803,9 +814,26 @@ class PageInfo:
         
         return self.links
     
-    def get_prev(self):
-        if self.n_page > 0:
-            return 
+    def get_next_overlay(self):
+        return self.overlay.get(self.o_n+1)
+        
+    def get_prev_overlay(self):
+        return self.overlay.get(self.o_n-1)
+    
+    def get_next(self, skip_overlay=False):
+        if not skip_overlay:
+            next = self.get_next_overlay()
+            if next: return next
+        return self.next
+    
+    def get_prev(self, skip_overlay=False):
+        if not skip_overlay:
+            prev = self.get_prev_overlay()
+            if prev: return prev
+        if self.o_n > 0:
+            return self.overlay.get(0)
+        
+        return self.prev
     
     def get_image(self, width, height, note=False):
         # TODO: cache image?
@@ -854,10 +882,12 @@ class Link:
 # colors
 BLACK   = QtGui.QColor(0, 0, 0)
 WHITE   = QtGui.QColor(255, 255, 255)
+BLUE     = QtGui.QColor(50, 50, 250)
 
 HELP_BG   = QtGui.QColor(30, 30, 30, 220)
 
 BG   = BLACK
+HG   = BLUE
 TEXT = WHITE
 DIM  = QtGui.QColor(50, 50, 50, 100)
 COLD = QtGui.QColor(100, 100, 200)
