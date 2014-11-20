@@ -6,6 +6,7 @@ import os, sys
 import time
 try:
     from PyQt4 import QtGui, QtCore
+    from PyQt4.phonon import Phonon
     import popplerqt4
 except:
     print( "Requires python binding for Qt4 and poppler-Qt4" )
@@ -16,7 +17,6 @@ except:
 #   multipage overview
 #   caching ?
 #   jump ?
-#   video support ?
 
 class Application(QtGui.QApplication):
     """The root application
@@ -29,11 +29,11 @@ class Application(QtGui.QApplication):
     
         self.doc = Document(filename)
         
-        self.cur_page = 0
         self.first_is_master = None
         self.helping = False
         self.overview_mode = False
         self.debug = False
+        self.previous_page = None
         
         self.clock_start = None
         self.clock = 0
@@ -86,6 +86,11 @@ class Application(QtGui.QApplication):
     
     def refresh(self, full=True):
         "Trigger a redraw"
+        
+        # detect when to stop videos
+        if self.previous_page != self.doc.current:
+            self.previous_page = self.doc.current
+            self.stop_videos()
         
         # hide the cursor if it didn't move for a while
         if self.last_move_time:
@@ -199,8 +204,34 @@ class Application(QtGui.QApplication):
         self.overview_mode = not self.overview_mode
         self.refresh()
     
+    def stop_videos(self):
+        stopped = False
+        for v in self.views:
+            stopped = stopped or v.stop_videos()
+        return stopped
+    
+    def video(self):
+        "Play videos from the current slide"
+        if self.stop_videos():
+            return
+        
+        for x,y,w,h,url,data in self.doc.current.get_movies():
+            if url and not os.path.isfile(url):
+                print( "external video not found" )
+                url = None
+            
+            if not url and not data:
+                continue
+            
+            for v in self.views:
+                v.video(x,y,w,h, url,data)
+        
     def escape(self):
         "Leave modes (overview...), pause, quit the application"
+        
+        if self.stop_videos():
+            return
+        
         if self.helping:
             self.help()
             return
@@ -264,7 +295,7 @@ def find_link(evt, links):
                 return l
 
 
-def place_image(qpainter, info, x,y,w,h, links=None, linkPaint=None, note=False, align=0):
+def place_image(qpainter, info, x,y,w,h, links=None, linkPaint=None, note=False, align=0, view=None):
     "Paint a page info properly aligned in the selected area"
     if info:
         image = info.get_image(w,h, note)
@@ -284,6 +315,10 @@ def place_image(qpainter, info, x,y,w,h, links=None, linkPaint=None, note=False,
             if ih < h:
                 y += h-ih
         qpainter.drawImage(x,y, image)
+        
+        if view:
+            # remember the image position
+            view.slide_position = (x,y,iw,ih)
         
         if links is None:
             return
@@ -329,7 +364,7 @@ def show_progress(qp, x,y, w,h, cur, total):
             qp.setBrush(ICON)
             for i in xrange(total):
                 if i == cur:
-                    qp.setBrush(HG)
+                    qp.setBrush(SEL)
                     qp.drawRect(x,y,w,point_size)
                     qp.setBrush(ICON)
                 else:
@@ -369,7 +404,6 @@ class View(QtGui.QFrame):
         super(View, self).__init__()
         self.app = app
         self.doc = app.doc
-        self.setGeometry(300, 300, 1000, 800)
         self.setWindowTitle('Simple PDF presenter')
         self.cachedSize = None
         self.full_repaint = True
@@ -377,6 +411,8 @@ class View(QtGui.QFrame):
         self.presenter_mode = is_presenter
         self.single_mode = is_single
         self.setMouseTracking(True)
+        self.video_players = []
+        self.slide_position = None
     
         # Place the selected view fullscreen on the selected monitor
         self.showFullScreen()
@@ -476,6 +512,7 @@ class View(QtGui.QFrame):
     
     def repaint(self):
         width,height = self. setup()
+        self.slide_position = None
         
         qp = QtGui.QPainter()
         qp.begin(self)
@@ -489,7 +526,12 @@ class View(QtGui.QFrame):
         if self.app.helping and (self.presenter_mode or self.single_mode):
             show_help(qp, width, height)
         
+        # make sure that no video is left running in wrong cases
+        if not self.slide_position:
+            self.stop_videos()
+        
         qp.end()
+        
     
     def paint_slide(self, qp, width, height):
         if self.doc.color:
@@ -502,7 +544,7 @@ class View(QtGui.QFrame):
             
             self.link_map = []
             info = self.doc.get_slide()
-            place_image(qp, info, 0,0, width,height, self.link_map, LINK_N)
+            place_image(qp, info, 0,0, width,height, self.link_map, LINK_N, view=self)
     
     def paint_presenter(self, qp, width, height):
         # partial repaints are not yet working: widget is painted in grey first
@@ -630,6 +672,81 @@ class View(QtGui.QFrame):
     
     def mouseReleaseEvent(self, evt):
         self.app.click_map(evt, self.link_map)
+    
+    def stop_videos(self):
+        if not self.video_players:
+            return False
+        
+        for movie in self.video_players:
+            movie.stop()
+        self.video_players = []
+        return True
+    
+    def video(self, x,y,w,h, url, ef):
+        if not self.slide_position:
+            return
+        
+        media = get_media_source(url, ef)
+        
+        if not media:
+            # TODO: some GUI feedback
+            print("no video source could be created")
+            return
+        
+        dx,dy, fx,fy = self.slide_position
+        x = dx + x*fx
+        y = dy + y*fy
+        w *= fx
+        h *= fy
+        
+        self.video_players.append( Movie(self, media, x,y, w,h) )
+
+
+class Movie:
+    def __init__(self, parent, media, x,y,w,h):
+        self.player = Phonon.VideoPlayer( parent )
+        self.player.setGeometry(x,y,w,h)
+        self.player.show()
+        self.player.load(media)
+        self.player.play()
+    
+    def stop(self):
+        if self.player:
+            self.player.stop()
+            self.player.hide()
+            self.player.setParent(None)
+
+
+def get_media_source(url=None, embeddedFile=None):
+    "Turn an external link or n embded file into a playable media source"
+    
+    if url:
+        try:
+            return Phonon.MediaSource(url)
+        except:
+            print( "Failed to open video file ", url )
+    
+    if embeddedFile:
+        try:
+            videoData = embeddedFile.data()
+            if COPY_EMBEDDED_VIDEO:
+                # first copy the file to /tmp
+                # do not autoremove the temp file: it happens too soon
+                tmp = QtCore.QTemporaryFile()
+                tmp.setAutoRemove(False)
+                tmp.open()
+                tmp.write( videoData )
+                tmp.close()
+                print( "playing embedded file from ", tmp.fileName() )
+                return Phonon.MediaSource( tmp.fileName() )
+            else:
+                # play the embedded file directly: cleaner but not working
+                buff = QtCore.QBuffer( videoData )
+                #buff.open( QtCore.QIODevice.ReadOnly )
+                return Phonon.MediaSource( buff )
+        except:
+            print( "Failed to open video from data" )
+    return media
 
 
 class Document:
@@ -646,6 +763,7 @@ class Document:
             print( "Error loading the file" )
             sys.exit()
         
+        self.basedir = os.path.dirname(filename)
         self.lastPage = self.doc.numPages()
         
         self.note_vertical = False
@@ -863,14 +981,46 @@ class PageInfo:
                     self.links.append( Link(x,y,w,h, page) )
                 elif isinstance(link, popplerqt4.Poppler.LinkAction):
                     # TODO: action links (used by beamer)
-                    #print( "Action link: ", link.actionType() )
                     pass
                 else:
                     # other types of links to support?
-                    #print( type(link) )
+                    print( type(link) )
                     pass
+            self.get_movies()
         
         return self.links
+    
+    def get_movies(self):
+        movies = []
+        for annot in self.page.annotations():
+            if isinstance(annot, popplerqt4.Poppler.MovieAnnotation):
+                # movie annotation to a separate file (as added by beamer)
+                area = annot.boundary()
+                x = area.x()
+                y = area.y()
+                w = area.width()
+                h = area.height()
+                url = str( annot.movie().url() )
+                url = os.path.join(self.doc.basedir, url)
+                url= os.path.abspath( url )
+                if not url.startswith( self.doc.basedir ):
+                    print("External movies only accepted in current or sub folders")
+                else:
+                    movies.append( (x,y,w,h, url,None) )
+            elif isinstance(annot, popplerqt4.Poppler.FileAttachmentAnnotation):
+                # Detect movies in file attachment annotations (inserted by movie15 in LaTeX)
+                area = annot.boundary()
+                x = area.x()
+                y = area.y()
+                w = area.width()
+                h = area.height()
+                annot.contents() # gives the MIME type: 'Media File (video/mp4)'
+                # TODO: how to check if it is indeed a playable movie ?
+                if True:
+                    f = annot.embeddedFile() # gives the file itself
+                    movies.append( (x,y,w,h, None,f) )
+        
+        return movies
     
     def get_next_overlay(self):
         return self.overlay.get(self.o_n+1)
@@ -937,19 +1087,34 @@ class Link:
             self.h = -h
 
 
+COPY_EMBEDDED_VIDEO = True
+
 # colors
+HUE = 225           # Hue for all colors
+HUE = 225           # Hue for all colors
+# fancy HSV color setup: change the HUE to change the theme
+RED = 0
+BROWN = 40
+GREEN = 120
+BLUE = 240
+
+HUE = BLUE
+sL, vL =  20,200    # saturation and value for the light color
+sM, vM = 100,200    # saturation and value for the intermediate color
+sF, vF = 255,150    # saturation and value for the highlight
+sS, vS = 250,200    # saturation and value for the selection
+
 BLACK   = QtGui.QColor(0, 0, 0)
 WHITE   = QtGui.QColor(255, 255, 255)
-BLUE     = QtGui.QColor(50, 50, 250)
 
-HELP_BG   = QtGui.QColor(30, 30, 30, 220)
-
-BG   = BLACK
-HG   = BLUE
-TEXT = WHITE
-DIM  = QtGui.QColor(50, 50, 50, 100)
-COLD = QtGui.QColor(100, 100, 200)
-ICON  = QtGui.QColor(150, 150, 150)
+BG      = BLACK
+TEXT    = WHITE
+HELP_BG = QtGui.QColor(30, 30, 30, 220)
+DIM     = QtGui.QColor(50, 50, 50, 100)
+ICON    = QtGui.QColor.fromHsv(HUE, sL, vL)
+COLD    = QtGui.QColor.fromHsv(HUE,sM,vM)
+HG      = QtGui.QColor.fromHsv(HUE,sF,vF)
+SEL     = QtGui.QColor.fromHsv(HUE,sS,vS)
 
 LINK = QtGui.QColor(200, 50, 50, 50)
 LINK_N = QtGui.QColor(50, 50, 200, 50)
@@ -983,6 +1148,7 @@ KEYMAP = [
     
     (A.help,      K.Key_H, K.Key_Question),
 #    (A.jump,      K.Key_G, K.Key_J),
+    (A.video,      K.Key_V, ),
     (A.overview,  K.Key_Tab, K.Key_O, ),
     
     (A.escape,    K.Key_Escape, K.Key_Q),
@@ -1004,7 +1170,9 @@ def get_help():
         shorts = " ".join(shorts)
         l = len(shorts)
         if l > maxshort: maxshort = l
-        doc = cb.__doc__.split("\n")[0]
+        
+        if cb.__doc__: doc = cb.__doc__.split("\n")[0]
+        else: doc = ""
         l = len(doc)
         if l > maxdescr: maxdescr = l
         keys.append( (cb.__name__, doc, shorts) )
