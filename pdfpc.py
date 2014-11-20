@@ -58,7 +58,7 @@ class Application(QtGui.QApplication):
             slide_view = View(self, desktop,1, False, False)
             self.views = (presenter_view, slide_view)
         else:
-            main_view = View(self, desktop,0, True,True)
+            main_view = View(self, desktop,0, False,True)
             self.views = (main_view, )
         
         self.keymap = {}
@@ -302,11 +302,12 @@ def place_image(qpainter, info, x,y,w,h, links=None, linkPaint=None, note=False,
 
 
 def show_progress(qp, x,y, w,h, cur, total):
-    if cur < 1 or cur > total:
+    if total < 2 or cur < 1 or cur > total:
         return
     
-    # horizontal or vertical bars
+    
     if w > h:
+        # horizontal bar
         pw = w*cur/total
         dw = w/total
         dx = x + pw - dw
@@ -314,6 +315,29 @@ def show_progress(qp, x,y, w,h, cur, total):
         dh = h
         dy = y
     else:
+        # vertical bar: first try dashed mode
+        
+        # size of points and space in dashed mode
+        point_size = 3*w
+        space_size = 2*w
+        skip = point_size+space_size
+        dashed_needed = total * skip
+        if dashed_needed < 3*h/4:
+            # render in dashed mode
+            cur -= 1
+            y += (h - dashed_needed) / 2
+            qp.setBrush(ICON)
+            for i in xrange(total):
+                if i == cur:
+                    qp.setBrush(HG)
+                    qp.drawRect(x,y,w,point_size)
+                    qp.setBrush(ICON)
+                else:
+                    qp.drawRect(x,y,w,point_size)
+                
+                y += skip
+            return
+        
         pw = w
         dw = w
         dx = x
@@ -457,7 +481,7 @@ class View(QtGui.QFrame):
         qp.begin(self)
         if self.app.overview_mode and (self.presenter_mode or self.single_mode):
             self.paint_overview(qp, width, height)
-        elif self.presenter_mode:
+        elif self.presenter_mode or (self.single_mode and not self.app.clock_start):
             self.paint_presenter(qp, width, height)
         else:
             self.paint_slide(qp, width, height)

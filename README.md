@@ -11,11 +11,12 @@ Features
 
 The screenshots (taken with pdfpc's demo presentation) give a good first taste.
 
+Main features:
 * Presenter screen with current and next slide, timer and progress bar
 * Note slides in the presenter view
-* Switch master and secondary screens, single screen mode
-* Detect beamer's overlays: they don't count in the progress and can be skipped
 * Overview mode: view and select slides
+* Detect beamer's overlays (successive pages with the same label):
+  don't count them in the global progress, fast forward and overview
 * Freeze the main screen
 * Hide the main screen (black or white)
 * Escape will unfreeze and unhide before exiting
@@ -23,7 +24,22 @@ The screenshots (taken with pdfpc's demo presentation) give a good first taste.
 * show help on screen and on the command line (if no file is given)
 
 
-To be fair, support for notes is a bit tricky:
+Two screens mode:
+* presenter console on the first screen
+* slide view on the second screen
+* they can be switched
+* overview visible on the presenter screen only
+
+
+Single screen mode:
+* show the slide view by default
+* can switch between slide and presenter console
+* always show the presenter console when paused
+* freezing is disabled
+* overview always visible
+
+
+Supported notes types:
 * Beamer "show notes on second screen" mode is supported if the file name ends with
   ".right", ".left", ".top", or ".bottom" (before the .pdf extension).
   Note that with this option, beamer tends to mess page number, which break
