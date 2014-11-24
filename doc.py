@@ -3,6 +3,7 @@ from __future__ import print_function, division
 import os, sys
 import time
 import popplerqt4
+import gui
 
 
 # label for automatic note detection
@@ -136,6 +137,7 @@ class PageInfo:
             self.prev = prev.prev
         
         self.links = None
+        self.videos = None
         size = self.page.pageSize()
         x,y,w,h = 0,0,  size.width(), size.height()
         
@@ -186,41 +188,43 @@ class PageInfo:
                     # other types of links to support?
                     print( type(link) )
                     pass
-            self.get_movies()
         
         return self.links
     
-    def get_movies(self):
-        movies = []
-        for annot in self.page.annotations():
-            if isinstance(annot, popplerqt4.Poppler.MovieAnnotation):
-                # movie annotation to a separate file (as added by beamer)
-                area = annot.boundary()
-                x = area.x()
-                y = area.y()
-                w = area.width()
-                h = area.height()
-                url = str( annot.movie().url() )
-                url = os.path.join(self.doc.basedir, url)
-                url= os.path.abspath( url )
-                if not url.startswith( self.doc.basedir ):
-                    print("External movies only accepted in current or sub folders")
-                else:
-                    movies.append( (x,y,w,h, url,None) )
-            elif isinstance(annot, popplerqt4.Poppler.FileAttachmentAnnotation):
-                # Detect movies in file attachment annotations (inserted by movie15 in LaTeX)
-                area = annot.boundary()
-                x = area.x()
-                y = area.y()
-                w = area.width()
-                h = area.height()
-                annot.contents() # gives the MIME type: 'Media File (video/mp4)'
-                # TODO: how to check if it is indeed a playable movie ?
-                if True:
-                    f = annot.embeddedFile() # gives the file itself
-                    movies.append( (x,y,w,h, None,f) )
+    def get_videos(self):
+        if self.videos is None:
+            self.videos = []
+            for annot in self.page.annotations():
+                if isinstance(annot, popplerqt4.Poppler.MovieAnnotation):
+                    # movie annotation to a separate file (as added by beamer)
+                    area = annot.boundary()
+                    x = area.x()
+                    y = area.y()
+                    w = area.width()
+                    h = area.height()
+                    url = str( annot.movie().url() )
+                    url = os.path.join(self.doc.basedir, url)
+                    url= os.path.abspath( url )
+                    if not url.startswith( self.doc.basedir ):
+                        print("External videos only accepted in current or sub folders")
+                    else:
+                        media = gui.get_media_source(url,None)
+                        self.videos.append( (x,y,w,h, media) )
+                elif isinstance(annot, popplerqt4.Poppler.FileAttachmentAnnotation):
+                    # Detect movies in file attachment annotations (inserted by movie15 in LaTeX)
+                    area = annot.boundary()
+                    x = area.x()
+                    y = area.y()
+                    w = area.width()
+                    h = area.height()
+                    annot.contents() # gives the MIME type: 'Media File (video/mp4)'
+                    # TODO: how to check if it is indeed a playable video ?
+                    if True:
+                        f = annot.embeddedFile() # gives the file itself
+                        media = gui.get_media_source(None,f)
+                        self.videos.append( (x,y,w,h, media) )
         
-        return movies
+        return self.videos
     
     def get_next_overlay(self):
         return self.overlay.get(self.o_n+1)

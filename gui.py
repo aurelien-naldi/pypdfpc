@@ -2,6 +2,7 @@ from __future__ import print_function, division
 
 import os, sys
 import time
+import traceback
 from PyQt4 import QtGui, QtCore
 from PyQt4.phonon import Phonon
 
@@ -37,10 +38,9 @@ FROZEN = "F"
 
 
 class StatusBar(QtGui.QWidget):
+    "The bottom bar of the presenter console: shows a timer and status icons"
     def __init__(self, app, view):
         self.app = app
-        self.view = view
-        self.doc = app.doc
         super(StatusBar, self).__init__(view)
         self._timer = QtCore.QTimer()
         self._timer.timeout.connect(self.refresh)
@@ -70,7 +70,7 @@ class StatusBar(QtGui.QWidget):
         qp.setBrush(HELP_BG)
         qp.setPen(HELP_BG)
         qp.drawRect(0,0,w,h)
-        show_progress(qp, 0, h-margin, w,margin, self.app.get_current().n+1, len(self.doc.layout))
+        show_progress(qp, 0, h-margin, w,margin, self.app.get_current().n+1, len(self.app.doc.layout))
         
         qp.setPen(TEXT)
         qp.setFont(self.font)
@@ -119,10 +119,9 @@ class StatusBar(QtGui.QWidget):
 class SlideView(QtGui.QWidget):
     def __init__(self, app, view):
         self.app = app
-        self.view = view
-        self.doc = app.doc
         self.info = None
         self.image = None
+        self.baits = []
         super(SlideView, self).__init__(view)
     
     def set_slide(self, info):
@@ -132,7 +131,7 @@ class SlideView(QtGui.QWidget):
         
         if not self.image:
             self.update()
-        
+    
     def resizeEvent(self, evt):
         self.image = None
     
@@ -140,6 +139,11 @@ class SlideView(QtGui.QWidget):
         size = self.size()
         width =  size.width()
         height = size.height()
+        
+        # clear old links
+        for bait in self.baits:
+            bait.clear()
+        self.baits = []
         
         qp = QtGui.QPainter()
         qp.begin(self)
@@ -149,18 +153,81 @@ class SlideView(QtGui.QWidget):
             qp.setBrush(self.app.color)
             qp.drawRect(0, 0, width, height)
         else:
-            self.link_map = []
             if self.info and not self.image:
                 self.image = self.info.get_image(width,height)
-            paint_image(qp, self.image, 0,0,width,height)
+            ix,iy,iw,ih = paint_image(qp, self.image, 0,0,width,height)
+            
+            # add links
+            for l in self.info.get_links():
+                ax = ix + iw * l.x
+                ay = iy + ih * l.y
+                aw = iw * l.w
+                ah = ih * l.h
+                bait = ClickBait(self, ax,ay,aw,ah)
+                self.baits.append( bait )
+            
+            # add videos
+            for vx,vy,vw,vh,media in self.info.get_videos():
+                if not media:
+                    continue
+                
+                ax = ix + iw * vx
+                ay = iy + ih * vy
+                aw = iw * vw
+                ah = ih * vh
+                bait = VideoBox(self, ax,ay,aw,ah, media)
+                self.baits.append(bait)
+            
         qp.end()
+    
+    def video(self):
+        print ("call video")
+        for bait in self.baits:
+            if isinstance(bait,VideoBox):
+                bait.activate()
+        
+    def stop(self):
+        found = False
+        for bait in self.baits:
+            if isinstance(bait,VideoBox):
+                found = found or bait.clear()
+        return found
+
+
+class ClickBait(QtGui.QWidget):
+    def __init__(self, view, x,y,w,h):
+        super(ClickBait, self).__init__(view)
+        self.setGeometry(x,y,w,h)
+        self.show()
+    
+    def activate(self):
+        print( "Something was clicked :)" )
+    
+    def clear(self):
+        self.setParent(None)
+    
+#    def paintEvent(self, e):
+#        size = self.size()
+#        width =  size.width()
+#        height = size.height()
+#        
+#        qp = QtGui.QPainter()
+#        qp.begin(self)
+#        
+#        qp.setBrush(DIM)
+#        qp.drawRect(0, 0, width, height)
+#        
+#        qp.end()
+#    
+#    def mouseReleaseEvent(self, evt):
+#        pass
+#        #self.activate()
+
 
 
 class SideBar(QtGui.QWidget):
     def __init__(self, app, view):
         self.app = app
-        self.view = view
-        self.doc = app.doc
         super(SideBar, self).__init__(view)
     
     def refresh(self):
@@ -211,7 +278,6 @@ class SideBar(QtGui.QWidget):
 class Overview(QtGui.QWidget):
     def __init__(self, app, view):
         self.app = app
-        self.view = view
         self.doc = app.doc
         # pick settings for the overview
         n = len(self.doc.layout)
@@ -283,8 +349,6 @@ class Overview(QtGui.QWidget):
 class HelpBox(QtGui.QWidget):
     def __init__(self, app, view):
         self.app = app
-        self.view = view
-        self.doc = app.doc
         super(HelpBox, self).__init__(view)
     
     def paintEvent(self, e):
@@ -328,7 +392,6 @@ class View(QtGui.QFrame):
     def __init__(self, app, desktop_info, target_desktop, is_presenter, is_single):
         self.app = app
         self.doc = app.doc
-        self.cachedSize = None
         self.link_map = None
         self.presenter_mode = is_presenter
         self.single_mode = is_single
@@ -339,6 +402,7 @@ class View(QtGui.QFrame):
         self.video_players = []
         self.slide_position = None
         
+        # add child widgets
         self.status = StatusBar(self.app, self)
         self.sidebar = SideBar(self.app, self)
         self.overview = Overview(self.app, self)
@@ -353,36 +417,12 @@ class View(QtGui.QFrame):
         self.config_view()
         
     def resizeEvent(self, evt=None):
-        self.setup()
-    
-    def setup(self):
-        "Called at each repaint: returns the screen size and reconfigure if it changed (which should not happen after startup)"
+        "reconfigure the layout upon resize (which should not happen after startup)"
         size = self.size()
-        if size == self.cachedSize:
-            return size.width(),size.height()
-        
-        self.cachedSize = size
         width = size.width()
         height = size.height()
-
-        border = 2
         
-        
-        # pick settings for the overview
-        n = len(self.doc.layout)
-        onx = 3
-        ony = 2
-        while n > onx*ony:
-            if ony < onx:
-                ony += 1
-            else:
-                onx += 1
-            if onx > 5:
-                break
-        r_overview = (border,border, width,height, onx, ony, 10)
-        
-        # presenter mode
-        
+        # evaluate space for the slide, status, and side bars
         h_bottom = 3*height/20
         margin = h_bottom / 8
         
@@ -390,6 +430,7 @@ class View(QtGui.QFrame):
         h_cur = height - h_bottom
         x_side = w_cur + margin
         w_side = width - x_side
+        
         self.width = width
         self.height = height
         self.w_cur = w_cur
@@ -403,26 +444,7 @@ class View(QtGui.QFrame):
         self.overview.move(0,0)
         self.helpbox.resize(width,height)
         self.helpbox.move(0,0)
-        
-        width -= margin
-        h_next = 2*height/5
-        
-        r_cur = (border,border, w_cur, h_cur)
-        h_side = h_cur/2 - margin
-        r_over = (x_side, border, w_side, h_side)
-        r_next = (x_side, border+h_side+2*margin, w_side, h_side)
-        
-        r_o_progress = (width-margin,border, margin, h_cur)
-        
-        
-        self.layout = {
-            "cur": r_cur,
-            "over": r_over,
-            "next": r_next,
-            "o_progress": r_o_progress,
-            "overview": r_overview,
-        }
-        return width,height
+    
     
     def switch_mode(self):
         self.presenter_mode = not self.presenter_mode
@@ -465,93 +487,82 @@ class View(QtGui.QFrame):
         l = self.app.has_moved(e, self.link_map)
     
     def refresh(self):
-        self.update()
-    
-    def paintEvent(self, e):
-        width,height = self. setup()
-        self.slide_position = None
-        
-        qp = QtGui.QPainter()
-        qp.begin(self)
-        qp.setBrush(BG)
-        qp.setPen(BG)
-        qp.drawRect(0,0,width,height)
-        
-        
-        if False and  self.app.overview_mode and (self.presenter_mode or self.single_mode):
-            self.paint_overview(qp, width, height)
-        elif self.presenter_mode:
+        if self.presenter_mode:
             self.slideview.set_slide(self.app.get_current())
-#            self.paint_presenter(qp, width, height)
         else:
             self.slideview.set_slide(self.app.get_slide())
-        
-        # make sure that no video is left running in wrong cases
-        if not self.slide_position:
-            self.stop_videos()
-        
-        qp.end()
-        
+        self.update()
     
-    def paint_presenter(self, qp, width, height):
-        # partial repaints are not yet working: widget is painted in grey first
-        self.sidebar.show()
-        self.status.show()
-        self.link_map = []
-        # background
-        qp.setBrush(BG)
-        qp.drawRect(0, 0, width, height)
-        
-        x,y,w,h = self.layout["cur"]
-        info = self.app.get_current()
-        place_image(qp, info, x,y,w,h, self.link_map, align=-1)
-        
     
     def mouseReleaseEvent(self, evt):
         self.app.click_map(evt, self.link_map)
     
     def stop_videos(self):
-        if not self.video_players:
-            return False
-        
-        for movie in self.video_players:
-            movie.stop()
-        self.video_players = []
-        return True
+        return self.slideview.stop()
     
-    def video(self, x,y,w,h, url, ef):
-        if not self.slide_position:
-            return
-        
-        media = get_media_source(url, ef)
-        
-        if not media:
-            # TODO: some GUI feedback
-            print("no video source could be created")
-            return
-        
-        dx,dy, fx,fy = self.slide_position
-        x = dx + x*fx
-        y = dy + y*fy
-        w *= fx
-        h *= fy
-        
-        self.video_players.append( Movie(self, media, x,y, w,h) )
+    def video(self):
+        self.slideview.video()
+    
 
 
-class Movie:
-    def __init__(self, parent, media, x,y,w,h):
-        self.player = Phonon.VideoPlayer( parent )
-        self.player.setGeometry(x,y,w,h)
-        self.player.show()
-        self.player.load(media)
-        self.player.play()
+class VideoBox(ClickBait):
+    "Placeholder widget for inline videos"
+    def __init__(self, view, x,y,w,h, media):
+        super(VideoBox, self).__init__(view,x,y,w,h)
+        self.media = media
+        self.player = None
+        self.active = False
     
-    def stop(self):
+    def activate(self):
+        print (" activating video")
+        self.active = not self.active
+#        self.update()
+        return
+        
+        if not self.player:
+            
+            # TODO: actually add the video player
+            w = self.size().width()
+            h = self.size().height()
+            self.player = Phonon.VideoPlayer( self )
+            self.player.setGeometry(0,0,w,h)
+            self.player.show()
+            self.player.load(self.media)
+            self.player.play()
+        else:
+            self.clear()
+    
+    def clear(self):
+        self.active = False
+        return
+        
         if self.player:
+            print ("stopping video")
             self.player.stop()
             self.player.hide()
             self.player.setParent(None)
+            self.player = None
+            return True
+    
+    def paintEvent(self, e):
+        size = self.size()
+        width =  size.width()
+        height = size.height()
+        
+        qp = QtGui.QPainter()
+        qp.begin(self)
+        
+        tb = sys.exc_info()[2]
+        print( "paint: ", self.active, tb)
+        traceback.print_tb( tb )
+        if self.active:
+            qp.setBrush(COLD)
+        else:
+            qp.setBrush(BLACK)
+        
+        qp.drawRect(0, 0, width, height)
+        
+        qp.end()
 
 
 def get_media_source(url=None, embeddedFile=None):
@@ -587,13 +598,13 @@ def get_media_source(url=None, embeddedFile=None):
 
 
 
-def place_image(qpainter, info, x,y,w,h, links=None, note=False, align=0, view=None):
+def place_image(qpainter, info, x,y,w,h, note=False, align=0):
     "Paint a page info properly aligned in the selected area"
     if info:
         image = info.get_image(w,h, note)
-        paint_image(qpainter, image, x,y,w,h, links, align, view)
+        paint_image(qpainter, image, x,y,w,h, align)
 
-def paint_image(qpainter, image, x,y,w,h, links=None, align=0, view=None):
+def paint_image(qpainter, image, x,y,w,h, align=0):
     if not image:
         return
     
@@ -614,22 +625,7 @@ def paint_image(qpainter, image, x,y,w,h, links=None, align=0, view=None):
             y += h-ih
     qpainter.drawImage(x,y, image)
     
-    if view:
-        # remember the image position
-        view.slide_position = (x,y,iw,ih)
-    
-    if links is None:
-        return
-    
-    # TODO: rework link handling
-    return
-    
-    for l in info.get_links():
-        ax = x + iw * l.x
-        ay = y + ih * l.y
-        aw = iw * l.w
-        ah = ih * l.h
-        links.append( (ax,ay,ax+aw,ay+ah, l.page) )
+    return (x,y,iw,ih)
 
 
 def show_progress(qp, x,y, w,h, cur, total):

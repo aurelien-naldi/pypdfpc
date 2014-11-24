@@ -150,7 +150,7 @@ class Application(QtGui.QApplication):
         # hide the cursor if it didn't move for a while
         if self.last_move_time:
             if time.time() > self.last_move_time + 3:
-                QtGui.QApplication.setOverrideCursor(self.NO_CURSOR)
+                #QtGui.QApplication.setOverrideCursor(self.NO_CURSOR)
                 self.last_move_time = None
         
         for v in self.views:
@@ -252,17 +252,9 @@ class Application(QtGui.QApplication):
         if self.stop_videos():
             return
         
-        for x,y,w,h,url,data in self.current.get_movies():
-            if url and not os.path.isfile(url):
-                print( "external video not found" )
-                url = None
-            
-            if not url and not data:
-                continue
-            
-            for v in self.views:
-                v.video(x,y,w,h, url,data)
-        
+        for v in self.views:
+            v.video()
+    
     def escape(self):
         "Leave modes (overview...), pause, quit the application"
         
