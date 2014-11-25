@@ -141,51 +141,53 @@ class SlideView(QtGui.QWidget):
         height = size.height()
         
         # clear old links
-        for bait in self.baits:
-            bait.clear()
-        self.baits = []
+        if not self.image or self.app.color:
+            for bait in self.baits:
+                bait.clear()
+            self.baits = []
+        
         
         qp = QtGui.QPainter()
         qp.begin(self)
         
-        
         if self.app.color:
             qp.setBrush(self.app.color)
             qp.drawRect(0, 0, width, height)
-        else:
-            if self.info and not self.image:
+        elif self.info:
+            if not self.image:
                 self.image = self.info.get_image(width,height)
-            ix,iy,iw,ih = paint_image(qp, self.image, 0,0,width,height)
+                ix,iy,iw,ih = paint_image(qp, self.image, 0,0,width,height)
             
-            # add links
-            for l in self.info.get_links():
-                ax = ix + iw * l.x
-                ay = iy + ih * l.y
-                aw = iw * l.w
-                ah = ih * l.h
-                bait = ClickBait(self, ax,ay,aw,ah)
-                self.baits.append( bait )
-            
-            # add videos
-            for vx,vy,vw,vh,media in self.info.get_videos():
-                if not media:
-                    continue
+                # add links
+                for l in self.info.get_links():
+                    ax = ix + iw * l.x
+                    ay = iy + ih * l.y
+                    aw = iw * l.w
+                    ah = ih * l.h
+                    bait = LinkBox(self, l.page, ax,ay,aw,ah)
+                    self.baits.append( bait )
                 
-                ax = ix + iw * vx
-                ay = iy + ih * vy
-                aw = iw * vw
-                ah = ih * vh
-                bait = VideoBox(self, ax,ay,aw,ah, media)
-                self.baits.append(bait)
+                # add videos
+                for vx,vy,vw,vh,media in self.info.get_videos():
+                    if not media:
+                        continue
+                    
+                    ax = ix + iw * vx
+                    ay = iy + ih * vy
+                    aw = iw * vw
+                    ah = ih * vh
+                    bait = VideoBox(self, ax,ay,aw,ah, media)
+                    self.baits.append(bait)
+            else:
+                paint_image(qp, self.image, 0,0,width,height)
             
         qp.end()
     
     def video(self):
-        print ("call video")
         for bait in self.baits:
             if isinstance(bait,VideoBox):
                 bait.activate()
-        
+    
     def stop(self):
         found = False
         for bait in self.baits:
@@ -195,34 +197,34 @@ class SlideView(QtGui.QWidget):
 
 
 class ClickBait(QtGui.QWidget):
+    "Base class for links and videos: take up the reserved space and detect clicks"
+    
     def __init__(self, view, x,y,w,h):
         super(ClickBait, self).__init__(view)
+        self.setCursor( QtGui.QCursor(QtCore.Qt.PointingHandCursor) )
         self.setGeometry(x,y,w,h)
         self.show()
     
     def activate(self):
-        print( "Something was clicked :)" )
+        pass
     
     def clear(self):
+        self.hide()
         self.setParent(None)
     
-#    def paintEvent(self, e):
-#        size = self.size()
-#        width =  size.width()
-#        height = size.height()
-#        
-#        qp = QtGui.QPainter()
-#        qp.begin(self)
-#        
-#        qp.setBrush(DIM)
-#        qp.drawRect(0, 0, width, height)
-#        
-#        qp.end()
-#    
-#    def mouseReleaseEvent(self, evt):
-#        pass
-#        #self.activate()
+    def mouseReleaseEvent(self, evt):
+        self.activate()
 
+
+class LinkBox(ClickBait):
+    "PDF links: jump to another page on the same document"
+    def __init__(self, view, target, x,y,w,h):
+        super(LinkBox, self).__init__(view, x,y, w,h)
+        self.app = view.app
+        self.target = target
+    
+    def activate(self):
+        self.app.set_current(self.target)
 
 
 class SideBar(QtGui.QWidget):
@@ -293,12 +295,43 @@ class Overview(QtGui.QWidget):
         self.onx = onx
         self.ony = ony
         
+        self.thumbs = []
+        self.selected = None
+        self.n = n
+        
         super(Overview, self).__init__(view)
     
-    def paintEvent(self, e):
+    def clear(self):
+        for t in self.thumbs:
+            t.clear()
+    
+    def move_selection(self, m):
+        if self.selected is None:
+            return
+        
+        newsel = self.selected + m
+        if newsel < 0:
+            newsel = 0
+        elif self.selected >= self.n:
+            new = self.n-1
+        
+        if newsel != self.selected:
+            self.thumbs[self.selected].select(False)
+            self.thumbs[newsel].select()
+            self.selected = newsel
+    
+    def next(self):
+        self.move_selection(1)
+    
+    def prev(self):
+        self.move_selection(-1)
+    
+    def refresh(self):
         # TODO: multipage overview
         #  * shift starting point
         #  * show page indicators
+        
+        self.clear()
         
         size = self.size()
         width =  size.width()
@@ -309,17 +342,9 @@ class Overview(QtGui.QWidget):
         w = width - margin
         h = height - margin
         
-        qp = QtGui.QPainter()
-        qp.begin(self)
-        
-        qp.setBrush(BG)
-        qp.drawRect(x,y, w,h)
         
         n = len(self.doc.layout)
         start = 0
-        
-        qp.setBrush(BG)
-        qp.drawRect(0, 0, width, height)
         
         dx = w / self.onx
         mw = dx-m
@@ -331,6 +356,7 @@ class Overview(QtGui.QWidget):
         cury = y+mm
         i = start
         self.link_map = []
+        current = self.app.get_current().overlay.pages[0]
         for line in xrange(self.ony):
             curx = x+mm
             for col in xrange(self.onx):
@@ -338,13 +364,56 @@ class Overview(QtGui.QWidget):
                 if i >= n:
                     break
                 info = self.doc.layout[i]
-                place_image(qp, info, curx,cury,mw,mh)
-                self.link_map.append( (curx,cury,curx+mw,cury+mh, info) )
+                is_current = info==current
+                box = ThumbBox(self, info, is_current, curx,cury,mw,mh)
+                self.thumbs.append(box)
                 i += 1
                 curx += dx
             cury += dy
+
+class ThumbBox(ClickBait):
+    "Thumbnail in the overview"
+    
+    def __init__(self, view, target, is_current, x,y,w,h):
+        super(ThumbBox, self).__init__(view, x,y, w,h)
+        self.app = view.app
+        self.target = target
+        self.is_current = is_current
+        self.is_selected = is_current
+        self.image = None
+    
+    def select(self, s=True):
+        self.is_selected = s
+        self.update()
+    
+    def resizeEvent(self, evt):
+        self.image = None
+    
+    def activate(self):
+        self.app.set_current(self.target)
+    
+    def paintEvent(self, evt):
+        size = self.size()
+        width =  size.width()
+        height = size.height()
         
+        if not self.image:
+            self.image = self.target.get_image(width,height)
+        
+        qp = QtGui.QPainter()
+        qp.begin(self)
+        
+        if self.is_selected:
+            qp.setBrush(SEL)
+        elif self.is_current:
+            qp.setBrush(SEL)
+        else:
+            qp.setBrush(ICON)
+        
+        qp.drawRect(0,0, width,height)
+        paint_image(qp, self.image, 0,0,width,height)
         qp.end()
+
 
 class HelpBox(QtGui.QWidget):
     def __init__(self, app, view):
@@ -397,6 +466,7 @@ class View(QtGui.QFrame):
         self.single_mode = is_single
 
         super(View, self).__init__()
+        self.setStyleSheet("background-color:black;")
         self.setWindowTitle('Simple PDF presenter')
         self.setMouseTracking(True)
         self.video_players = []
@@ -464,6 +534,7 @@ class View(QtGui.QFrame):
             self.slideview.hide()
             self.status.hide()
             self.sidebar.hide()
+            self.overview.refresh()
             self.overview.show()
         elif self.presenter_mode:
             self.slideview.resize(self.w_cur, self.h_cur)
@@ -511,17 +582,9 @@ class VideoBox(ClickBait):
         super(VideoBox, self).__init__(view,x,y,w,h)
         self.media = media
         self.player = None
-        self.active = False
     
     def activate(self):
-        print (" activating video")
-        self.active = not self.active
-#        self.update()
-        return
-        
         if not self.player:
-            
-            # TODO: actually add the video player
             w = self.size().width()
             h = self.size().height()
             self.player = Phonon.VideoPlayer( self )
@@ -533,40 +596,15 @@ class VideoBox(ClickBait):
             self.clear()
     
     def clear(self):
-        self.active = False
-        return
-        
         if self.player:
-            print ("stopping video")
             self.player.stop()
             self.player.hide()
             self.player.setParent(None)
             self.player = None
-            return True
-    
-    def paintEvent(self, e):
-        size = self.size()
-        width =  size.width()
-        height = size.height()
-        
-        qp = QtGui.QPainter()
-        qp.begin(self)
-        
-        tb = sys.exc_info()[2]
-        print( "paint: ", self.active, tb)
-        traceback.print_tb( tb )
-        if self.active:
-            qp.setBrush(COLD)
-        else:
-            qp.setBrush(BLACK)
-        
-        qp.drawRect(0, 0, width, height)
-        
-        qp.end()
 
 
 def get_media_source(url=None, embeddedFile=None):
-    "Turn an external link or n embded file into a playable media source"
+    "Turn an external link or embded file into a playable media source"
     
     if url:
         try:

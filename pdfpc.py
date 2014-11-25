@@ -62,6 +62,7 @@ class Application(QtGui.QApplication):
             main_view = View(self, desktop,0, False,True)
             self.views = (main_view, )
         
+        self.keyhandler = None
         self.keymap = {}
         for short in KEYMAP:
             cb = short[0]
@@ -70,21 +71,23 @@ class Application(QtGui.QApplication):
         
         self.just_starting()
     
+    def set_current(self, page):
+        self.just_starting()
+        if page:
+            self.current = page
+            self.refresh()
+        if self.overview_mode:
+            self.overview()
+    
     def next(self, skip_overlay=False):
         "Go to the next slide or overlay"
-        self.just_starting()
         next = self.current.get_next(skip_overlay)
-        if next:
-            self.current = next
-            self.refresh()
+        self.set_current( next )
     
     def prev(self, skip_overlay=False):
         "Go to the previous slide or overlay"
-        self.just_starting()
         prev = self.current.get_prev(skip_overlay)
-        if prev:
-            self.current = prev
-            self.refresh()
+        self.set_current( prev )
     
     def forward(self):
         "Go to the next slide (skip overlays)"
@@ -165,6 +168,9 @@ class Application(QtGui.QApplication):
             QtGui.QApplication.setOverrideCursor(self.BASE_CURSOR)
         return l
     
+    def grab_keys(self, handler):
+        self.keyhandler = handler
+    
     def handle_key(self, e):
         "Keyboard shortcuts: use a predefined keymap"
         if type(e) == QtGui.QKeyEvent:
@@ -173,6 +179,8 @@ class Application(QtGui.QApplication):
                 return
             
             key = e.key()
+            if self.keyhandler:
+                self.keyhandler.handle_key()
             if key in self.keymap:
                 e.accept()
                 callback = self.keymap[key]
