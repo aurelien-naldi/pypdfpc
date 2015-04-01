@@ -333,10 +333,10 @@ K = QtCore.Qt
 A = Application
 KEYMAP = [
     
-    (A.next,      K.Key_Right, K.Key_Space, K.Key_MediaNext),
-    (A.prev,      K.Key_Left, K.Key_Backspace, K.Key_MediaPrevious), 
-    (A.forward,   K.Key_Down, K.Key_PageDown,),
-    (A.backward,  K.Key_Up, K.Key_PageUp, ),
+    (A.next,      K.Key_Right, K.Key_Down, K.Key_Space,     K.Key_MediaNext),
+    (A.prev,      K.Key_Left,  K.Key_Up,   K.Key_Backspace, K.Key_MediaPrevious),
+    (A.forward,   K.Key_PageDown,),
+    (A.backward,  K.Key_PageUp, ),
     
     (A.switch,    K.Key_S, ),
     
