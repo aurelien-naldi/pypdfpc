@@ -32,6 +32,7 @@ class Application(QtGui.QApplication):
         self.freezed = None
         self.color = None
         self.current = self.doc.pages[0]
+        self.current_overview = None
         
         self.first_is_master = None
         self.helping = False
@@ -79,13 +80,23 @@ class Application(QtGui.QApplication):
         if self.overview_mode:
             self.overview()
     
+    def set_current_overview(self, page):
+        if not self.overview or not page:
+            return
+        self.current_overview = page
+        self.refresh()
+    
     def next(self, skip_overlay=False):
         "Go to the next slide or overlay"
+        if self.overview_mode:
+            return self.overview_move(False, skip_overlay)
         next = self.current.get_next(skip_overlay)
         self.set_current( next )
     
     def prev(self, skip_overlay=False):
         "Go to the previous slide or overlay"
+        if self.overview_mode:
+            return self.overview_move(True, skip_overlay)
         prev = self.current.get_prev(skip_overlay)
         self.set_current( prev )
     
@@ -105,6 +116,9 @@ class Application(QtGui.QApplication):
     
     def get_current(self):
         return self.current
+    
+    def get_current_overview(self):
+        return self.current_overview
     
     def get_next(self):
         return self.current.next
@@ -243,11 +257,24 @@ class Application(QtGui.QApplication):
         self.clock_start = None
         self.refresh()
     
-    def overview(self):
+    def overview(self, escape=False):
         "Show a grid of slides for quick visual selection"
+        if not self.overview_mode:
+            self.current_overview = self.current
+        else:
+            if not escape and self.current_overview:
+                self.current = self.current_overview
+            self.current_overview = None
         self.overview_mode = not self.overview_mode
         for v in self.views:
             v.config_view()
+    
+    def overview_move(self, backward, vertical):
+        if backward:
+            next = self.current_overview.get_prev(vertical)
+        else:
+            next = self.current_overview.get_next(vertical)
+        self.set_current_overview( next )
     
     def stop_videos(self):
         stopped = False
@@ -273,7 +300,7 @@ class Application(QtGui.QApplication):
             return self.help()
         
         if self.overview_mode:
-            return self.overview()
+            return self.overview(True)
         
         if self.color:
             return self.trigger_color(None)

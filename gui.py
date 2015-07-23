@@ -12,6 +12,7 @@ COPY_EMBEDDED_VIDEO = True
 # fancy HSV color setup: change the HUE to change the theme
 RED,BROWN,GREEN,BLUE = 0,40,120,240
 HUE = BLUE
+HUE2 = GREEN
 
 sL, vL =  20,200    # saturation and value for the light color
 sM, vM = 100,200    # saturation and value for the intermediate color
@@ -30,6 +31,7 @@ ICON    = QtGui.QColor.fromHsv(HUE, sL, vL)
 COLD    = QtGui.QColor.fromHsv(HUE,sM,vM)
 HG      = QtGui.QColor.fromHsv(HUE,sF,vF)
 SEL     = QtGui.QColor.fromHsv(HUE,sS,vS)
+SEL2     = QtGui.QColor.fromHsv(HUE2,sS,vS)
 
 LINK = QtGui.QColor(200, 50, 50, 50)
 
@@ -298,6 +300,7 @@ class Overview(QtGui.QWidget):
         self.thumbs = []
         self.selected = None
         self.n = n
+        self.start = 0
         
         super(Overview, self).__init__(view)
     
@@ -344,7 +347,6 @@ class Overview(QtGui.QWidget):
         
         
         n = len(self.doc.layout)
-        start = 0
         
         dx = w / self.onx
         mw = dx-m
@@ -354,9 +356,10 @@ class Overview(QtGui.QWidget):
         
         mm = m/2
         cury = y+mm
-        i = start
+        i = self.start
         self.link_map = []
         current = self.app.get_current().overlay.pages[0]
+        current_o = self.app.get_current_overview().overlay.pages[0]
         for line in xrange(self.ony):
             curx = x+mm
             for col in xrange(self.onx):
@@ -365,7 +368,8 @@ class Overview(QtGui.QWidget):
                     break
                 info = self.doc.layout[i]
                 is_current = info==current
-                box = ThumbBox(self, info, is_current, curx,cury,mw,mh)
+                is_selected = info==current_o
+                box = ThumbBox(self, info, is_current, is_selected, curx,cury,mw,mh)
                 self.thumbs.append(box)
                 i += 1
                 curx += dx
@@ -374,12 +378,12 @@ class Overview(QtGui.QWidget):
 class ThumbBox(ClickBait):
     "Thumbnail in the overview"
     
-    def __init__(self, view, target, is_current, x,y,w,h):
+    def __init__(self, view, target, is_current, is_selected, x,y,w,h):
         super(ThumbBox, self).__init__(view, x,y, w,h)
         self.app = view.app
         self.target = target
         self.is_current = is_current
-        self.is_selected = is_current
+        self.is_selected = is_selected
         self.image = None
     
     def select(self, s=True):
@@ -398,13 +402,13 @@ class ThumbBox(ClickBait):
         height = size.height()
         
         if not self.image:
-            self.image = self.target.get_image(width,height)
+            self.image = self.target.get_image(width-10, height-10)
         
         qp = QtGui.QPainter()
         qp.begin(self)
         
         if self.is_selected:
-            qp.setBrush(SEL)
+            qp.setBrush(SEL2)
         elif self.is_current:
             qp.setBrush(SEL)
         else:
@@ -558,7 +562,9 @@ class View(QtGui.QFrame):
         l = self.app.has_moved(e, self.link_map)
     
     def refresh(self):
-        if self.presenter_mode:
+        if self.app.overview_mode and (self.presenter_mode or self.single_mode):
+            self.overview.refresh()
+        elif self.presenter_mode:
             self.slideview.set_slide(self.app.get_current())
         else:
             self.slideview.set_slide(self.app.get_slide())
