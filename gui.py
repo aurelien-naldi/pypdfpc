@@ -185,10 +185,10 @@ class SlideView(QtGui.QWidget):
             
         qp.end()
     
-    def video(self):
+    def video(self, loop=False):
         for bait in self.baits:
             if isinstance(bait,VideoBox):
-                bait.activate()
+                bait.activate(loop)
     
     def stop(self):
         found = False
@@ -577,8 +577,8 @@ class View(QtGui.QFrame):
     def stop_videos(self):
         return self.slideview.stop()
     
-    def video(self):
-        self.slideview.video()
+    def video(self, loop=False):
+        self.slideview.video(loop)
     
 
 
@@ -588,8 +588,10 @@ class VideoBox(ClickBait):
         super(VideoBox, self).__init__(view,x,y,w,h)
         self.media = media
         self.player = None
+        self.loop = False
     
-    def activate(self):
+    def activate(self, loop=False):
+        self.loop = loop
         if not self.player:
             w = self.size().width()
             h = self.size().height()
@@ -598,8 +600,14 @@ class VideoBox(ClickBait):
             self.player.show()
             self.player.load(self.media)
             self.player.play()
+            
+            self.player.finished.connect(self.finished)
         else:
             self.clear()
+    
+    def finished(self):
+        if self.player and self.loop:
+            self.player.play()
     
     def clear(self):
         if self.player:
