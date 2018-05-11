@@ -1,6 +1,5 @@
-from __future__ import print_function, division
-
 import os, sys
+import math
 import time
 import traceback
 from PyQt4 import QtGui, QtCore
@@ -284,7 +283,7 @@ class Overview(QtGui.QWidget):
         self.app = app
         self.doc = app.doc
         # pick settings for the overview
-        n = len(self.doc.layout)
+        self.n = n = len(self.doc.layout)
         onx = 3
         ony = 2
         while n > onx*ony:
@@ -292,14 +291,15 @@ class Overview(QtGui.QWidget):
                 ony += 1
             else:
                 onx += 1
-            if onx > 5:
+            if onx > 6:
                 break
         self.onx = onx
         self.ony = ony
-        
+        self.nthumbs = onx * ony
+        self.npages = math.ceil(n / self.nthumbs)
+
         self.thumbs = []
         self.selected = None
-        self.n = n
         self.start = 0
         
         super(Overview, self).__init__(view)
@@ -339,7 +339,7 @@ class Overview(QtGui.QWidget):
         size = self.size()
         width =  size.width()
         height = size.height()
-        m = margin = width/20
+        m = margin = 10
         
         x = y = margin/2
         w = width - margin
@@ -356,22 +356,38 @@ class Overview(QtGui.QWidget):
         
         mm = m/2
         cury = y+mm
-        i = self.start
         self.link_map = []
         current = self.app.get_current().overlay.pages[0]
         current_o = self.app.get_current_overview().overlay.pages[0]
-        for line in xrange(self.ony):
+        # find the starting page
+        self.start = 0
+        nthumbs = self.nthumbs - 2
+        if n > self.nthumbs and current_o.n > nthumbs:
+            skipped = int(math.floor( (current_o.n - 1) / nthumbs ))
+            self.start = nthumbs * skipped + 1
+        i = self.start
+        for line in range(self.ony):
             curx = x+mm
-            for col in xrange(self.onx):
-                
+            for col in range(self.onx):
                 if i >= n:
                     break
-                info = self.doc.layout[i]
-                is_current = info==current
-                is_selected = info==current_o
-                box = ThumbBox(self, info, is_current, is_selected, curx,cury,mw,mh)
-                self.thumbs.append(box)
-                i += 1
+                if self.start > 0 and line == 0 and col == 0:
+                    # Link to the previous page
+                    info = self.doc.layout[i-1]
+                    box = PrevNextBox(self, info, curx,cury,mw,mh, True)
+                    self.thumbs.append(box)
+                elif line == self.ony-1 and col == self.onx-1 and i < n:
+                    # Link to the next page
+                    info = self.doc.layout[i]
+                    box = PrevNextBox(self, info, curx,cury,mw,mh, False)
+                    self.thumbs.append(box)
+                else:
+                    info = self.doc.layout[i]
+                    is_current = info==current
+                    is_selected = info==current_o
+                    box = ThumbBox(self, info, is_current, is_selected, curx,cury,mw,mh)
+                    self.thumbs.append(box)
+                    i += 1
                 curx += dx
             cury += dy
 
@@ -394,28 +410,70 @@ class ThumbBox(ClickBait):
         self.image = None
     
     def activate(self):
-        self.app.set_current(self.target)
-    
+        self.app.set_current_overview(self.target, True)
+
     def paintEvent(self, evt):
         size = self.size()
         width =  size.width()
         height = size.height()
-        
+
         if not self.image:
             self.image = self.target.get_image(width-10, height-10)
-        
+
         qp = QtGui.QPainter()
         qp.begin(self)
-        
+
         if self.is_selected:
             qp.setBrush(SEL2)
         elif self.is_current:
             qp.setBrush(SEL)
         else:
             qp.setBrush(ICON)
-        
+
         qp.drawRect(0,0, width,height)
         paint_image(qp, self.image, 0,0,width,height)
+        qp.end()
+
+class PrevNextBox(ClickBait):
+    "Prev/Next page in the overview"
+
+    def __init__(self, view, target, x,y,w,h, is_prev):
+        super(PrevNextBox, self).__init__(view, x,y, w,h)
+        self.view = view
+        self.target = target
+        self.is_selected = False
+        self.is_prev = is_prev
+
+    def select(self, s=True):
+        self.is_selected = s
+        self.update()
+
+    def activate(self):
+        self.view.app.set_current_overview(self.target)
+
+    def paintEvent(self, evt):
+        size = self.size()
+        width =  size.width()
+        height = size.height()
+
+        qp = QtGui.QPainter()
+        qp.begin(self)
+
+        qp.setBrush(WHITE)
+
+        # TODO: draw some arrow thingie
+        qp.drawRect(10, height/2 - 5, width - 20, 10)
+        if self.is_prev:
+            px  = int(2*width/3)
+            pxx = width - 10
+        else:
+            px = int(width/3)
+            pxx = width + 10
+        y_up = int(height/3)
+        y_down = int(2*height/3)
+        y_mid = int(height/2)
+        arrow = QtGui.QPolygon( (px,y_up, pxx,y_mid, px,y_down) )
+        qp.drawPolygon( arrow )
         qp.end()
 
 
@@ -698,7 +756,7 @@ def show_progress(qp, x,y, w,h, cur, total):
             cur -= 1
             y += (h - dashed_needed) / 2
             qp.setBrush(ICON)
-            for i in xrange(total):
+            for i in range(total):
                 if i == cur:
                     qp.setBrush(SEL)
                     qp.drawRect(x,y,w,point_size)

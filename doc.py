@@ -1,5 +1,3 @@
-from __future__ import print_function, division
-
 import os, sys
 import time
 import popplerqt4
@@ -59,7 +57,7 @@ class Document:
         prev = None
         self.layout = []
         self.pages = []
-        for p in xrange(self.lastPage):
+        for p in range(self.lastPage):
             page = self.doc.page(p)
             if search_note and page.label() == NOTE_LABEL:
                 prev.set_note_page(page)
@@ -112,6 +110,7 @@ class PageInfo:
         self.page = page
         self.doc = doc
         self.label = page.label()
+        self.cached = {}
         
         # no known successor yet
         self.next = None
@@ -248,6 +247,14 @@ class PageInfo:
         return self.prev
     
     def get_image(self, width, height, note=False):
+        if width > 400:
+            return self.render_image(width, height, note)
+        size = (width,height)
+        if size not in self.cached:
+            self.cached[size] = self.render_image(width, height, note)
+        return self.cached[size]
+
+    def render_image(self, width, height, note=False):
         # TODO: cache image?
         # decide of DPI based on page and widget sizes
         page = self.page

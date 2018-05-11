@@ -1,7 +1,5 @@
 #! /usr/bin/python
 
-from __future__ import print_function, division
-
 import os, sys
 import time
 try:
@@ -80,10 +78,12 @@ class Application(QtGui.QApplication):
         if self.overview_mode:
             self.overview()
     
-    def set_current_overview(self, page):
+    def set_current_overview(self, page, finished=False):
         if not self.overview or not page:
             return
         self.current_overview = page
+        if finished:
+            return self.overview()
         self.refresh()
     
     def next(self, skip_overlay=False):
@@ -360,10 +360,10 @@ K = QtCore.Qt
 A = Application
 KEYMAP = [
     
-    (A.next,      K.Key_Right, K.Key_Down, K.Key_Space,     K.Key_MediaNext),
-    (A.prev,      K.Key_Left,  K.Key_Up,   K.Key_Backspace, K.Key_MediaPrevious),
-    (A.forward,   K.Key_PageDown,),
-    (A.backward,  K.Key_PageUp, ),
+    (A.next,      K.Key_Right, K.Key_Down, K.Key_Space,     K.Key_MediaNext, K.Key_PageDown),
+    (A.prev,      K.Key_Left,  K.Key_Up,   K.Key_Backspace, K.Key_MediaPrevious, K.Key_PageUp),
+    (A.forward,   K.Key_F,),
+    (A.backward,  K.Key_B, ),
     
     (A.switch,    K.Key_S, ),
     
