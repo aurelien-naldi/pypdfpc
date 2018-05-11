@@ -282,13 +282,16 @@ class Application(QtGui.QApplication):
             stopped = stopped or v.stop_videos()
         return stopped
     
-    def video(self):
+    def loop(self, loop=False):
+        self.video(True)
+    
+    def video(self, loop=False):
         "Play videos from the current slide"
         if self.stop_videos():
             return
         
         for v in self.views:
-            v.video()
+            v.video(loop)
     
     def escape(self):
         "Leave modes (overview...), pause, quit the application"
@@ -379,6 +382,7 @@ KEYMAP = [
     (A.help,      K.Key_H, K.Key_Question),
 #    (A.jump,      K.Key_G, K.Key_J),
     (A.video,      K.Key_V, ),
+    (A.loop,      K.Key_L, ),
     (A.overview,  K.Key_Tab, K.Key_O, ),
     
     (A.escape,    K.Key_Escape, K.Key_Q),

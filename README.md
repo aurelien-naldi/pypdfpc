@@ -80,6 +80,12 @@ they are too complex and bring more security risks than real advantages.
 LaTeX documents using the media9 package generate such files:
 despite claiming to replace movie15, this package should be avoided.
 
+If you want to insert videos into your beamer slides, I suggest the multimedia package:
+
+  \usepackage{multimedia}
+  
+  \movie[width=3cm,height=2cm]{VIDEO}{vid/mov_bbb.mp4}
+
 
 
 Some missing-but-would-be-nice-to-have features:
@@ -105,7 +111,7 @@ Fedora:
 
 
 Debian/Ubuntu:
-    apt-get install python-qt4 python-poppler-qt4
+    apt-get install python-qt4 python-poppler-qt4 python-qt4-phonon
 
 
 
